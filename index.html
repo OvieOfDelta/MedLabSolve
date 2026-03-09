@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medical Lab Quiz</title>
+    <link rel="icon" href="photo.jpg">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app-container">
+
+     <!-- ============================================================
+         LOGOUT LOADER OVERLAY
+         ============================================================ -->
+    <div id="logout-loader">
+        <div class="logout-ring"></div>
+        <div class="logout-bar-wrap">
+            <div class="logout-bar-fill" id="logout-bar"></div>
+        </div>
+        <div class="logout-text" id="logout-text">Signing you out…</div>
+    </div>
+
+        <!-- ============================================================
+         LOGIN LOADER OVERLAY
+         ============================================================ -->
+    <div id="login-loader" class="hidden">
+        <div class="loader-ring"></div>
+        <div class="loader-dots">
+            <div class="loader-dot"></div>
+            <div class="loader-dot"></div>
+            <div class="loader-dot"></div>
+            <div class="loader-dot"></div>
+        </div>
+        <div class="loader-bar-wrap">
+            <div class="loader-bar-fill" id="loader-bar"></div>
+        </div>
+        <div class="loader-text" id="loader-text">Loading your dashboard…</div>
+    </div>
+    
+    <button id="theme-icon" onclick="toggleTheme()">🌙</button>
+
+    <!-- ============================================================
+         AUTH SCREEN
+         ============================================================ -->
+    <div id="auth-s" class="section">
+        <h1>Med Lab Quiz </h1>
+        <p id="auth-msg" style="margin-bottom: 16px;">Login to practice for MCQs</p>
+
+        <input type="text"     id="u-in"    placeholder="Username">
+        <input type="password" id="p-in"    placeholder="Password" id="p-in">
+
+        <!-- Register-only fields -->
+        <div id="reg-extra" class="hidden">
+            <input type="text" id="hint-in" placeholder="Security Hint (e.g. first pet's name)">
+
+            <label class="field-label">Avatar</label>
+            <select id="avatar-in" onchange="toggleCustomFile()">
+                <option value="🦁">Lion 🦁</option>
+                <option value="🦊">Fox 🦊</option>
+                <option value="🦉">Owl 🦉</option>
+                <option value="🥷">Ninja 🥷</option>
+                <option value="custom">Upload Photo 📷</option>
+            </select>
+            <input type="file" id="file-reg" class="hidden" accept="image/*" onchange="handleImageUpload(this, 'reg-preview')">
+            <div class="avatar-preview-wrap"><img id="reg-preview" class="avatar-img hidden"></div>
+        </div>
+
+        <!-- Forgot-password fields -->
+        <div id="forgot-extra" class="hidden">
+            <input type="text" id="hint-recover" placeholder="Enter your security hint">
+        </div>
+
+        <div class="remember-row">
+            <input type="checkbox" id="remember-me">
+            <label for="remember-me">Remember Me</label>
+        </div>
+
+        <button class="btn primary"    onclick="handleAuth()"             id="auth-main-btn">Enter</button>
+        <button class="btn secondary"  onclick="setAuthMode('register')"  id="btn-reg">Register New Account</button>
+        <button class="btn secondary"  onclick="setAuthMode('forgot')"    id="btn-forgot">Forgot Password?</button>
+        <button class="btn secondary hidden" onclick="setAuthMode('login')" id="btn-login">Back to Login</button>
+    </div>
+
+    <!-- ============================================================
+         DASHBOARD / MAIN SCREEN
+         ============================================================ -->
+     <div id="main-s" class="section hidden">
+        <h2><span id="display-avatar"></span> Hi, <span id="display-user"></span>!</h2>
+
+        <div class="rank-card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-weight:800;">Rank: <span id="display-rank"></span></span>
+                <span id="display-high" style="font-size:0.85rem; color:var(--muted);"></span>
+            </div>
+            <div class="progress-container"><div id="rank-progress" class="progress-fill"></div></div>
+            <p>Daily Streak: <span id="display-streak" class="streak-flame">0</span> 🔥</p>
+        </div>
+
+
+        <label class="field-label">Difficulty / Mode</label>
+        <select id="diff-select" style="margin-bottom:20px;">
+            <option value="0">🧘 Zen Mode (No Timer)</option>
+            <option value="20" selected>Easy (20s)</option>
+            <option value="12">Medium (12s)</option>
+            <option value="7">Hard (7s)</option>
+        </select>
+
+        <div id="sub-list" class="grid-2">
+            <button class="btn primary"    onclick="showSubMenu('Chemical Pathology')">Chemical Pathology 🧪</button>
+            <button class="btn primary"    onclick="showSubMenu('Histopathology')">Histopathology 🥼</button>
+            <button class="btn primary"    onclick="showSubMenu('Hematology')">Hematology 🩸</button>
+            <button class="btn primary"    onclick="showSubMenu('Microbiology')">Microbiology 🔬</button>
+            <button class="btn primary"    onclick="showSubMenu('Laboratory Management')">Laboratory Management 🛡️</button>
+
+            <button class="btn secondary"  onclick="showLeaderboard()">📊 Leaderboard</button>
+            <button class="btn secondary"  onclick="showTrophies()">🏆 Trophy Case</button>
+            <button class="btn secondary"  onclick="showSettings()">⚙️ Settings</button>
+            <button class="btn danger-btn" onclick="logout()">Logout 🚪</button>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         SUB-CATEGORY SCREEN
+         ============================================================ -->
+    <div id="sub-s" class="section hidden">
+        <h2 id="sub-title">Category</h2>
+        <div id="sub-list-dynamic"></div>
+        <button class="btn secondary" onclick="backToMain()" style="margin-top:10px;">← Back to Menu</button>
+    </div>
+
+    <!-- ============================================================
+         GAME SCREEN
+         ============================================================ -->
+    <div id="game-s" class="section hidden">
+        <div class="game-header">
+            <span id="game-stats">Q 1/1</span>
+            <span id="timer-disp"></span>
+        </div>
+        <div class="progress-container"><div id="game-progress" class="progress-fill"></div></div>
+        <div id="q-text"></div>
+        <div id="opt-container"></div>
+        <hr class="divider">
+        <button class="btn danger-btn sm" onclick="endQuiz()" style="border-style:dashed;">Stop &amp; Reveal Results 🛑</button>
+    </div>
+
+    <!-- ============================================================
+         RESULTS SCREEN
+         ============================================================ -->
+    <div id="res-s" class="section hidden">
+        <h2>Quiz Complete!</h2>
+        <div class="res-score-wrap animate-pop">
+            <div class="score-num" id="res-score">0</div>
+            <div class="score-sub" id="res-sub"></div>
+        </div>
+        <hr class="divider">
+        <div id="mistake-list" style="max-height:260px; overflow-y:auto;"></div>
+        <button class="btn primary"   onclick="finishAndReturn()" style="margin-top:14px;">Return to Topics</button>
+        <button class="btn secondary" onclick="backToMain()">Back to Menu</button>
+    </div>
+
+    <!-- ============================================================
+         LEADERBOARD SCREEN
+         ============================================================ -->
+    <div id="lead-s" class="section hidden">
+        <h2>🏆 Global Rankings</h2>
+        <div id="lead-list"></div>
+        <button class="btn secondary" onclick="backToMain()">← Back</button>
+    </div>
+
+    <!-- ============================================================
+         TROPHY SCREEN
+         ============================================================ -->
+    <div id="trophy-s" class="section hidden">
+        <h2>🏆 Trophy Gallery</h2>
+        <div id="badge-grid" class="badge-grid"></div>
+        <button class="btn secondary" onclick="backToMain()">← Back</button>
+    </div>
+
+    <!-- ============================================================
+         SETTINGS SCREEN
+         ============================================================ -->
+    <div id="settings-s" class="section hidden">
+        <h2>⚙️ Settings</h2>
+
+        <label class="field-label">Change Avatar</label>
+        <select id="set-avatar">
+            <option value="🦁">Lion 🦁</option>
+            <option value="🦊">Fox 🦊</option>
+            <option value="🦉">Owl 🦉</option>
+            <option value="🥷">Ninja 🥷</option>
+        </select>
+
+        <label class="field-label">Update Profile Photo</label>
+        <input type="file" id="file-set" accept="image/*" onchange="handleImageUpload(this, 'set-preview')">
+        <div class="avatar-preview-wrap"><img id="set-preview" class="avatar-img hidden"></div>
+
+        <label class="field-label">New Password</label>
+        <input type="password" id="set-pass" placeholder="Leave blank to keep current">
+
+        <button class="btn primary"    onclick="updateSettings()" style="margin-top:16px;">Save Changes</button>
+        <button class="btn danger-btn" onclick="resetData()">Wipe My Progress</button>
+        <button class="btn secondary"  onclick="backToMain()">← Back</button>
+    </div>
+
+    <footer class="login-footer"> &copy; 2026 NIMELSSA-LCU</footer>
+</div><!-- /#app-container -->
+
+
+
+    <script src="script.js"></script>
+</body>
+</html>
