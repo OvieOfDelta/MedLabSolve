@@ -1673,3 +1673,35 @@ window.fbLoadChallengeBanner = async function() {
 
     } catch (err) { /* silent */ }
 };
+
+/* ================================================================
+   EXPOSE FUNCTIONS TO GLOBAL SCOPE
+   Required because this file is a type="module" —
+   functions are not global by default inside modules.
+   ================================================================ */
+window.handleAuth = handleAuth;
+window.setAuthMode = setAuthMode;
+window.toggleTheme = toggleTheme;
+window.showSubMenu = showSubMenu;
+window.showSubSubMenu = showSubSubMenu;
+window.startQuiz = startQuiz;
+window.handleAnswer = handleAnswer;
+window.endQuiz = endQuiz;
+window.finishAndReturn = finishAndReturn;
+window.showLeaderboard = showLeaderboard;
+window.showTrophies = showTrophies;
+window.showSettings = showSettings;
+window.showShare = showShare;
+window.updateSettings = updateSettings;
+window.resetData = resetData;
+window.logout = logout;
+window.backToMain = backToMain;
+window.shareScore = shareScore;
+window.challengeFromResult = challengeFromResult;
+window.copyInviteCode = copyInviteCode;
+window.copyQuizLink = copyQuizLink;
+window.nativeShare = nativeShare;
+window.toggleCustomFile = toggleCustomFile;
+window.handleImageUpload = handleImageUpload;
+window.showMain = showMain;
+window.showToast = showToast;
