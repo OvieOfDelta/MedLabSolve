@@ -905,3 +905,44 @@ label.field-label {
     border-width: 2px;
     font-size: 0.95rem;
 }
+
+/* ── Leaderboard enhancements ──────────────────────────────── */
+.lead-row.top3 {
+    background: linear-gradient(135deg, var(--card), color-mix(in srgb, var(--accent) 8%, var(--card)));
+    border-left: 3px solid var(--accent);
+    font-weight: 700;
+}
+.lead-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.lead-name {
+    font-weight: 700;
+}
+.lead-score {
+    font-size: 1rem;
+    color: var(--accent);
+    white-space: nowrap;
+}
+.you-tag {
+    font-size: 0.72rem;
+    color: var(--accent);
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.tier-badge {
+    font-size: 0.68rem;
+    font-weight: 800;
+    padding: 2px 7px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+.tier-badge.diamond { background: #e8f4fd; color: #1a6fa0; border: 1px solid #90cdf4; }
+.tier-badge.gold    { background: #fef9e7; color: #b7791f; border: 1px solid #f6d860; }
+.tier-badge.silver  { background: #f7f7f7; color: #666;    border: 1px solid #ccc;    }
+.tier-badge.bronze  { background: #fdf0e8; color: #9c4a1a; border: 1px solid #e8a87c; }

@@ -24,7 +24,7 @@ const fbDb   = getFirestore(fbApp);
 /* ================================================================
    CONSTANTS
    ================================================================ */
-const QUIZ_URL = 'https://ovieofdelta.github.io/medlablcuquiz_website';
+const QUIZ_URL = 'https://ovieofDelta.github.io/OvieOfDelta_website';
 
 const BADGE_DATA = {
     "Chemical Pathologist":  "🧪",
@@ -657,7 +657,7 @@ async function fbShowMain() {
     const highEl = document.getElementById('display-high');
     highEl.innerHTML = (!d.high || d.high === 0)
         ? '<span style="color:var(--muted);">No quiz completed yet</span>'
-        : 'High: <b>' + d.high + '</b> pts';
+        : 'Best Score: <b>' + d.high + '</b> pts';
 
     var rank, rp;
     if (!d.high || d.high === 0) { rank = '🎯 Unranked'; rp = 0; }
@@ -731,10 +731,29 @@ async function fbShowLeaderboard() {
 
         played.forEach(function(p, i) {
             const row        = document.createElement('div');
-            row.className    = 'lead-row' + (p.name === myName ? ' me' : '');
-            const medal      = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '#' + (i + 1);
-            const avatarHtml = p.avatar.length > 10 ? '<img src="' + p.avatar + '" class="avatar-img" style="width:28px;height:28px;">' : p.avatar;
-            row.innerHTML    = '<span>' + medal + ' ' + avatarHtml + ' ' + p.name + (p.name === myName ? ' (You)' : '') + '</span><b>' + p.score + ' pts</b>';
+            const isMe       = p.name === myName;
+            const isTop3     = i < 3;
+            row.className    = 'lead-row' + (isMe ? ' me' : '') + (isTop3 ? ' top3' : '');
+
+            // Position medal — top 3 always get medals regardless of score
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '<span style="color:var(--muted);font-size:0.85rem;">#' + (i + 1) + '</span>';
+
+            // Tier badge based on score thresholds
+            var tier = '';
+            if      (p.score >= 20) tier = '<span class="tier-badge diamond">💎 Diamond</span>';
+            else if (p.score >= 10) tier = '<span class="tier-badge gold">🏅 Gold</span>';
+            else if (p.score >= 5)  tier = '<span class="tier-badge silver">🔘 Silver</span>';
+            else                    tier = '<span class="tier-badge bronze">🎖 Bronze</span>';
+
+            const avatarHtml = p.avatar.length > 10
+                ? '<img src="' + p.avatar + '" class="avatar-img" style="width:28px;height:28px;border-radius:50%;">'
+                : p.avatar;
+
+            row.innerHTML =
+                '<span class="lead-left">' + medal + ' ' + avatarHtml + ' ' +
+                '<span class="lead-name">' + p.name + (isMe ? ' <span class="you-tag">(You)</span>' : '') + '</span>' +
+                tier + '</span>' +
+                '<b class="lead-score">' + p.score + ' pts</b>';
             list.appendChild(row);
         });
 
