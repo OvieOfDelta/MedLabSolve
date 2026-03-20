@@ -30,7 +30,7 @@ const fbDb   = getFirestore(fbApp);
    ================================================================ */
 const appCheck = initializeAppCheck(fbApp, {
     provider: new ReCaptchaV3Provider(
-        'PASTE_YOUR_RECAPTCHA_SITE_KEY_HERE'
+        '6Lft35AsAAAAAFrThcPtW0rT84_EmYQ7spngIFRk'
     ),
     isTokenAutoRefreshEnabled: true
 });
