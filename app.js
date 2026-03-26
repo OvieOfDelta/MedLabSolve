@@ -8,9 +8,7 @@ import { getFirestore, doc, getDoc, setDoc, collection, getDocs }
 import { initializeAppCheck, ReCaptchaV3Provider }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app-check.js";
 
-/* ================================================================
-   FIREBASE SETUP
-   ================================================================ */
+
 const firebaseConfig = {
     apiKey:            "AIzaSyA6UtSUqHH4oIqGFVQRxNo9sE2kY-tT_6E",
     authDomain:        "medlablcuquiz.firebaseapp.com",
@@ -23,9 +21,7 @@ const fbApp  = initializeApp(firebaseConfig);
 const fbAuth = getAuth(fbApp);
 const fbDb   = getFirestore(fbApp);
 
-/* ================================================================
-   APP CHECK — Only registered domains can call Firebase APIs.
-   ================================================================ */
+
 const appCheck = initializeAppCheck(fbApp, {
     provider: new ReCaptchaV3Provider(
         '6Lft35AsAAAAAFrThcPtW0rT84_EmYQ7spngIFRk'
@@ -46,33 +42,21 @@ const BADGE_DATA = {
     "Laboratory Management": "🛡️"
 };
 
-/* ================================================================
-   SECURITY — LIMITS & VALIDATION
-   FIX: Input length caps prevent oversized data being stored in
-   Firestore. Character whitelist on username prevents injection
-   of special characters into HTML contexts and onclick strings.
-   ================================================================ */
+
 const LIMITS = {
     USERNAME_MIN:  3,
     USERNAME_MAX:  20,
     PASSWORD_MIN:  6,
     HINT_MAX:      80,
     MSG_MAX:       300,
-    AVATAR_MAX:    51200,   // 50 KB base64 cap
-    SCORE_MAX:     500,     // raise if you ever exceed 500 questions in one quiz
+    AVATAR_MAX:    51200,   
+    SCORE_MAX:     500,     
     TOPIC_MAX:     100,
 };
-// Only letters, digits and underscore — no quotes, HTML chars or spaces.
-// This whitelist is the primary defence against onclick-string injection.
+
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
 
-/* ================================================================
-   SECURITY — HTML SANITISER
-   FIX: Every piece of Firestore data that goes into innerHTML must
-   pass through esc(). This converts the five dangerous HTML chars
-   into their entity equivalents, blocking XSS completely.
-   Usage: element.innerHTML = '<b>' + esc(userValue) + '</b>';
-   ================================================================ */
+
 function esc(val) {
     return String(val == null ? '' : val)
         .replace(/&/g, '&amp;')
@@ -82,14 +66,6 @@ function esc(val) {
         .replace(/'/g, '&#39;');
 }
 
-/* ================================================================
-   SECURITY — SAFE AVATAR RENDERER
-   FIX: Previously avatar was concatenated directly into innerHTML
-   e.g. '<img src="' + d.avatar + '">' — an avatar value of
-   '" onerror="alert(1)' would execute JS.
-   Now we use createElement + setAttribute so the browser treats
-   the value as data, never as markup.
-   ================================================================ */
 function makeAvatarEl(avatar, sizePx) {
     if (avatar && avatar.length > 10) {
         const img = document.createElement('img');
@@ -109,12 +85,6 @@ function makeAvatarEl(avatar, sizePx) {
     return span;
 }
 
-/* ================================================================
-   SECURITY — LOGIN RATE LIMITER (client-side)
-   FIX: Limits consecutive failed login attempts before adding a
-   cooldown, reducing the effectiveness of credential stuffing.
-   Firebase Auth also throttles server-side; this adds a layer.
-   ================================================================ */
 const _loginAttempts = { count: 0, lockedUntil: 0 };
 function loginAllowed() {
     const now = Date.now();
