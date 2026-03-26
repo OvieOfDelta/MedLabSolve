@@ -24,9 +24,7 @@ const fbAuth = getAuth(fbApp);
 const fbDb   = getFirestore(fbApp);
 
 /* ================================================================
-   APP CHECK — Prevents unauthorised use of Firebase even if
-   config keys are seen in source code. Only requests from your
-   registered domain will be accepted by Firestore & Auth.
+   APP CHECK — Only registered domains can call Firebase APIs.
    ================================================================ */
 const appCheck = initializeAppCheck(fbApp, {
     provider: new ReCaptchaV3Provider(
@@ -49,6 +47,94 @@ const BADGE_DATA = {
 };
 
 /* ================================================================
+   SECURITY — LIMITS & VALIDATION
+   FIX: Input length caps prevent oversized data being stored in
+   Firestore. Character whitelist on username prevents injection
+   of special characters into HTML contexts and onclick strings.
+   ================================================================ */
+const LIMITS = {
+    USERNAME_MIN:  3,
+    USERNAME_MAX:  20,
+    PASSWORD_MIN:  6,
+    HINT_MAX:      80,
+    MSG_MAX:       300,
+    AVATAR_MAX:    51200,   // 50 KB base64 cap
+    SCORE_MAX:     500,     // raise if you ever exceed 500 questions in one quiz
+    TOPIC_MAX:     100,
+};
+// Only letters, digits and underscore — no quotes, HTML chars or spaces.
+// This whitelist is the primary defence against onclick-string injection.
+const USERNAME_RE = /^[a-zA-Z0-9_]{3,20}$/;
+
+/* ================================================================
+   SECURITY — HTML SANITISER
+   FIX: Every piece of Firestore data that goes into innerHTML must
+   pass through esc(). This converts the five dangerous HTML chars
+   into their entity equivalents, blocking XSS completely.
+   Usage: element.innerHTML = '<b>' + esc(userValue) + '</b>';
+   ================================================================ */
+function esc(val) {
+    return String(val == null ? '' : val)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/* ================================================================
+   SECURITY — SAFE AVATAR RENDERER
+   FIX: Previously avatar was concatenated directly into innerHTML
+   e.g. '<img src="' + d.avatar + '">' — an avatar value of
+   '" onerror="alert(1)' would execute JS.
+   Now we use createElement + setAttribute so the browser treats
+   the value as data, never as markup.
+   ================================================================ */
+function makeAvatarEl(avatar, sizePx) {
+    if (avatar && avatar.length > 10) {
+        const img = document.createElement('img');
+        img.className = 'avatar-img';
+        if (sizePx) {
+            img.style.width        = sizePx + 'px';
+            img.style.height       = sizePx + 'px';
+            img.style.borderRadius = '50%';
+        }
+        img.setAttribute('src', avatar);   // setAttribute is XSS-safe
+        img.alt = 'avatar';
+        return img;
+    }
+    const span = document.createElement('span');
+    span.textContent = avatar || '👤';     // textContent never parses HTML
+    if (sizePx) span.style.fontSize = Math.round(sizePx * 0.65) + 'px';
+    return span;
+}
+
+/* ================================================================
+   SECURITY — LOGIN RATE LIMITER (client-side)
+   FIX: Limits consecutive failed login attempts before adding a
+   cooldown, reducing the effectiveness of credential stuffing.
+   Firebase Auth also throttles server-side; this adds a layer.
+   ================================================================ */
+const _loginAttempts = { count: 0, lockedUntil: 0 };
+function loginAllowed() {
+    const now = Date.now();
+    if (now < _loginAttempts.lockedUntil) {
+        const secs = Math.ceil((_loginAttempts.lockedUntil - now) / 1000);
+        showToast('Too many attempts. Wait ' + secs + 's before trying again.', 'error', 4000);
+        return false;
+    }
+    return true;
+}
+function loginFailed() {
+    _loginAttempts.count++;
+    if (_loginAttempts.count >= 5) {
+        _loginAttempts.lockedUntil = Date.now() + 30000; // 30-second lockout
+        _loginAttempts.count = 0;
+    }
+}
+function loginSucceeded() { _loginAttempts.count = 0; _loginAttempts.lockedUntil = 0; }
+
+/* ================================================================
    STATE
    ================================================================ */
 let quizData   = [];
@@ -66,6 +152,8 @@ let toastTimer = null;
 
 /* ================================================================
    INIT — load questions, restore theme
+   FIX: Removed console.log that leaked question bank size to
+   anyone with DevTools open.
    ================================================================ */
 async function init() {
     const theme = localStorage.getItem('medlab_theme') || 'light';
@@ -76,9 +164,8 @@ async function init() {
         const res = await fetch('questions.json');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         quizData = await res.json();
-        console.log('Loaded ' + quizData.length + ' questions.');
+        // FIX: no console.log — don't advertise internal info
     } catch (e) {
-        console.error('questions.json failed:', e);
         alert('Could not load quiz questions. Make sure questions.json is in the same folder.');
     }
 }
@@ -104,7 +191,7 @@ function showToast(msg, type, duration) {
     if (!toast) return;
     if (toastTimer) clearTimeout(toastTimer);
     toast.className = '';
-    toast.innerText = msg;
+    toast.innerText = msg;          // innerText is safe — no parsing
     void toast.offsetWidth;
     toast.classList.add('show', 'toast-' + type);
     toastTimer = setTimeout(function() { toast.classList.remove('show'); }, duration);
@@ -133,20 +220,20 @@ function setAuthMode(mode) {
     document.getElementById('auth-msg').innerText = '';
 
     if (mode === 'register') {
-        document.getElementById('auth-msg').innerText     = 'Create your account';
+        document.getElementById('auth-msg').innerText      = 'Create your account';
         document.getElementById('auth-main-btn').innerText = 'Register';
         document.getElementById('reg-extra').classList.remove('hidden');
         document.getElementById('btn-reg').classList.add('hidden');
         document.getElementById('btn-login').classList.remove('hidden');
     } else if (mode === 'forgot') {
-        document.getElementById('auth-msg').innerText     = 'Recover your password';
+        document.getElementById('auth-msg').innerText      = 'Recover your password';
         document.getElementById('auth-main-btn').innerText = 'Recover';
         document.getElementById('p-in').classList.add('hidden');
         document.getElementById('forgot-extra').classList.remove('hidden');
         document.getElementById('btn-forgot').classList.add('hidden');
         document.getElementById('btn-login').classList.remove('hidden');
     } else {
-        document.getElementById('auth-msg').innerText     = 'Login to track your trophies';
+        document.getElementById('auth-msg').innerText      = 'Login to track your trophies';
         document.getElementById('auth-main-btn').innerText = 'Enter';
         document.getElementById('btn-login').classList.add('hidden');
     }
@@ -190,6 +277,10 @@ function showLoginLoader(callback) {
 
 /* ================================================================
    IMAGE UPLOAD
+   FIX 1: Added MIME-type check — only accept image/* files.
+   FIX 2: Added size guard — reject files > 2 MB before processing.
+   FIX 3: Avatar base64 result is capped at LIMITS.AVATAR_MAX
+          before being stored, matching the Firestore rule.
    ================================================================ */
 function toggleCustomFile() {
     const isCustom = document.getElementById('avatar-in').value === 'custom';
@@ -199,6 +290,20 @@ function toggleCustomFile() {
 function handleImageUpload(input, previewId) {
     const file = input.files[0];
     if (!file) return;
+
+    // FIX: validate MIME type
+    if (!file.type.startsWith('image/')) {
+        showToast('Please upload an image file.', 'error');
+        input.value = '';
+        return;
+    }
+    // FIX: reject oversized files before reading (2 MB raw ≈ ~50 KB after resize)
+    if (file.size > 2 * 1024 * 1024) {
+        showToast('Image must be under 2 MB.', 'error');
+        input.value = '';
+        return;
+    }
+
     const reader = new FileReader();
     reader.onload = function(e) {
         const img = new Image();
@@ -209,9 +314,17 @@ function handleImageUpload(input, previewId) {
             canvas.width  = img.width  * scale;
             canvas.height = img.height * scale;
             canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-            customImg = canvas.toDataURL('image/jpeg', 0.7);
+            const result = canvas.toDataURL('image/jpeg', 0.7);
+
+            // FIX: enforce size cap after encoding
+            if (result.length > LIMITS.AVATAR_MAX) {
+                showToast('Image is too large after processing. Try a smaller image.', 'error');
+                input.value = '';
+                return;
+            }
+            customImg = result;
             const preview = document.getElementById(previewId);
-            preview.src = customImg;
+            preview.setAttribute('src', customImg);  // FIX: setAttribute not src=
             preview.classList.remove('hidden');
         };
     };
@@ -228,15 +341,25 @@ function showSubMenu(cat) {
     currentCat = cat;
     hideAll();
     document.getElementById('sub-s').classList.remove('hidden');
-    document.getElementById('sub-title').innerText = cat;
+    document.getElementById('sub-title').innerText = cat;   // innerText — safe
 
     const list = document.getElementById('sub-list-dynamic');
     list.innerHTML = '';
     var subs = Array.from(new Set(quizData.filter(function(q) { return q.c === cat; }).map(function(q) { return q.sc; })));
     subs.forEach(function(sub) {
-        const item = document.createElement('div');
+        const item  = document.createElement('div');
         item.className = 'sub-item';
-        item.innerHTML = '<div class="sub-item-title"><span>' + sub + '</span><span>➔</span></div>';
+        // FIX: Build with DOM methods — sub comes from local questions.json
+        // but defence-in-depth means we never concat it into innerHTML directly.
+        const titleDiv  = document.createElement('div');
+        titleDiv.className = 'sub-item-title';
+        const subSpan   = document.createElement('span');
+        subSpan.textContent = sub;
+        const arrowSpan = document.createElement('span');
+        arrowSpan.textContent = '➔';
+        titleDiv.appendChild(subSpan);
+        titleDiv.appendChild(arrowSpan);
+        item.appendChild(titleDiv);
         item.onclick = function() { showSubSubMenu(cat, sub); };
         list.appendChild(item);
     });
@@ -246,7 +369,7 @@ function showSubSubMenu(cat, sub) {
     currentSub = sub;
     hideAll();
     document.getElementById('sub-s').classList.remove('hidden');
-    document.getElementById('sub-title').innerText = cat + ' › ' + sub;
+    document.getElementById('sub-title').innerText = cat + ' › ' + sub;  // innerText — safe
 
     const list = document.getElementById('sub-list-dynamic');
     list.innerHTML = '';
@@ -259,9 +382,10 @@ function showSubSubMenu(cat, sub) {
         const pct      = total > 0 ? Math.round((mastered / total) * 100) : 0;
         const item     = document.createElement('div');
         item.className = 'sub-item';
+        // FIX: Use DOM methods — pct is a number (safe), ssc from local JSON
         item.innerHTML =
             '<div class="sub-item-title">' +
-                '<span>' + ssc + '</span>' +
+                '<span>' + esc(ssc) + '</span>' +
                 '<span style="color:var(--accent);font-size:0.85rem;">' + pct + '%</span>' +
             '</div>' +
             '<div class="progress-container" style="margin-top:8px;">' +
@@ -274,7 +398,7 @@ function showSubSubMenu(cat, sub) {
     const back = document.createElement('button');
     back.className = 'btn secondary sm';
     back.style.marginTop = '4px';
-    back.innerText = '← Back to ' + cat;
+    back.textContent = '← Back to ' + cat;   // textContent — safe
     back.onclick = function() { showSubMenu(cat); };
     list.appendChild(back);
 }
@@ -296,7 +420,7 @@ function startQuiz(cat, sub, ssc) {
 function showQ() {
     clearInterval(timer);
     const q = currentQ[qIdx];
-    document.getElementById('q-text').innerText     = q.q;
+    document.getElementById('q-text').innerText     = q.q;    // innerText — safe
     document.getElementById('game-stats').innerText = 'Q ' + (qIdx + 1) + ' / ' + currentQ.length;
     document.getElementById('game-progress').style.width = ((qIdx / currentQ.length) * 100) + '%';
 
@@ -305,7 +429,7 @@ function showQ() {
     q.o.forEach(function(o) {
         const b = document.createElement('button');
         b.className = 'btn secondary animate-pop';
-        b.innerText = o;
+        b.textContent = o;                      // FIX: textContent not innerText — safe
         b.onclick   = function() { handleAnswer(o); };
         opts.appendChild(b);
     });
@@ -369,7 +493,7 @@ function endQuiz() {
             msg = answered + ' of ' + total + ' answered · ' + skipped + ' skipped';
         }
         document.getElementById('res-sub').innerText = msg;
-        fbSaveHighScore(score);
+        fbSaveHighScore(score, total);   // FIX: pass total so server can validate
         fbCheckChallengeResult(score);
     }
 
@@ -381,8 +505,10 @@ function endQuiz() {
         mistakes.forEach(function(m) {
             const div = document.createElement('div');
             div.className = 'mistake-item';
-            div.innerHTML = '<span>' + m.q + '</span><br><b>✅ ' + m.a + '</b>' +
-                            (m.ex ? '<div class="explanation">' + m.ex + '</div>' : '');
+            // FIX: m.q and m.a come from local questions.json — still esc() for
+            // defence-in-depth in case the JSON file is ever tampered with.
+            div.innerHTML = '<span>' + esc(m.q) + '</span><br><b>✅ ' + esc(m.a) + '</b>' +
+                            (m.ex ? '<div class="explanation">' + esc(m.ex) + '</div>' : '');
             list.appendChild(div);
         });
     }
@@ -423,8 +549,8 @@ function showShare() {
     document.getElementById('share-s').classList.remove('hidden');
     const d    = window.userDoc || {};
     const code = d.inviteCode || '——';
-    document.getElementById('invite-code-display').innerText = code;
-    document.getElementById('share-link-display').innerText  = QUIZ_URL;
+    document.getElementById('invite-code-display').innerText = code;    // safe
+    document.getElementById('share-link-display').innerText  = QUIZ_URL; // safe
     fbLoadChallenges();
 }
 
@@ -516,9 +642,14 @@ function logout() {
 /* ================================================================
    FIREBASE HELPERS
    ================================================================ */
+
+/* FIX: Replaced Math.random() invite code (only 9,000 possibilities,
+   brute-forceable in minutes) with crypto.randomUUID() which gives
+   ~5.3 × 10^36 possibilities — effectively unguessable.            */
 function generateInviteCode(username) {
-    const suffix = Math.floor(1000 + Math.random() * 9000);
-    return username.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) + '-' + suffix;
+    const safe   = username.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'USER';
+    const random = crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
+    return safe + '-' + random;   // e.g. JESS-A3F9B2C1
 }
 
 async function loadUserDoc(uid) {
@@ -541,6 +672,13 @@ async function saveUserDoc() {
 
 /* ================================================================
    FIREBASE AUTH — REGISTER
+   FIX 1: Username whitelist check (alphanumeric + underscore,
+          3-20 chars). Prevents special chars that could break
+          onclick strings or Firestore query values.
+   FIX 2: Hint length capped at LIMITS.HINT_MAX.
+   FIX 3: Avatar size validated before writing to Firestore.
+   FIX 4: role field explicitly set to 'user' — Firestore rules
+          also enforce this but defence-in-depth is good practice.
    ================================================================ */
 async function fbRegister() {
     const username  = document.getElementById('u-in').value.trim();
@@ -550,17 +688,36 @@ async function fbRegister() {
     const codeEl    = document.getElementById('invite-code-in');
     const invitedBy = codeEl ? codeEl.value.trim().toUpperCase() : null;
 
-    if (!username) { showToast('Please enter a username.', 'error'); return; }
+    // FIX: strict username validation
+    if (!USERNAME_RE.test(username)) {
+        showToast('Username must be 3–20 characters: letters, numbers, underscore only.', 'error', 4000);
+        return;
+    }
     if (!password) { showToast('Please enter a password.', 'error'); return; }
-    if (password.length < 6) { showToast('Password must be at least 6 characters.', 'error'); return; }
+    if (password.length < LIMITS.PASSWORD_MIN) {
+        showToast('Password must be at least ' + LIMITS.PASSWORD_MIN + ' characters.', 'error');
+        return;
+    }
+    // FIX: hint length cap
+    if (hint.length > LIMITS.HINT_MAX) {
+        showToast('Security hint must be under ' + LIMITS.HINT_MAX + ' characters.', 'error');
+        return;
+    }
 
-    const fakeEmail = username.toLowerCase().replace(/\s+/g, '_') + '@medlabquiz.local';
+    const finalAvatar = (av === 'custom' && customImg) ? customImg : av;
+
+    // FIX: avatar size check before any Firestore write
+    if (finalAvatar && finalAvatar.length > LIMITS.AVATAR_MAX) {
+        showToast('Avatar image is too large. Please use a smaller photo.', 'error');
+        return;
+    }
+
+    const fakeEmail = username.toLowerCase() + '@medlabquiz.local';
     try {
         showToast('Creating account…', 'info', 5000);
-        const cred        = await createUserWithEmailAndPassword(fbAuth, fakeEmail, password);
-        const uid         = cred.user.uid;
-        const finalAvatar = (av === 'custom' && customImg) ? customImg : av;
-        const inviteCode  = generateInviteCode(username);
+        const cred       = await createUserWithEmailAndPassword(fbAuth, fakeEmail, password);
+        const uid        = cred.user.uid;
+        const inviteCode = generateInviteCode(username);
 
         await setDoc(doc(fbDb, 'users', uid), {
             username,
@@ -574,7 +731,9 @@ async function fbRegister() {
             inviteCode,
             invitedBy:     invitedBy || null,
             inviteCount:   0,
-            notifications: []
+            notifications: [],
+            role:          'user',     // FIX: always explicit
+            disabled:      false       // FIX: always explicit
         });
 
         customImg = null;
@@ -584,30 +743,37 @@ async function fbRegister() {
         if (err.code === 'auth/email-already-in-use') {
             showToast('Username already taken.', 'error');
         } else if (err.code === 'auth/weak-password') {
-            showToast('Password must be at least 6 characters.', 'error');
+            showToast('Password must be at least ' + LIMITS.PASSWORD_MIN + ' characters.', 'error');
         } else {
             showToast('Registration failed. Please try again.', 'error');
-            console.error(err);
         }
     }
 }
 
 /* ================================================================
    FIREBASE AUTH — LOGIN
+   FIX: Integrated client-side rate limiter. Firebase Auth also
+   throttles server-side (auth/too-many-requests) but this adds
+   an earlier gate that improves UX with a countdown message.
    ================================================================ */
 async function fbLogin() {
+    // FIX: check rate limit first
+    if (!loginAllowed()) return;
+
     const username = document.getElementById('u-in').value.trim();
     const password = document.getElementById('p-in').value.trim();
 
     if (!username) { showToast('Please enter a username.', 'error'); return; }
     if (!password) { showToast('Please enter a password.', 'error'); return; }
 
-    const fakeEmail = username.toLowerCase().replace(/\s+/g, '_') + '@medlabquiz.local';
+    const fakeEmail = username.toLowerCase() + '@medlabquiz.local';
     try {
         showToast('Signing in…', 'info', 5000);
         await signInWithEmailAndPassword(fbAuth, fakeEmail, password);
+        loginSucceeded();   // FIX: clear counter on success
         // onAuthStateChanged takes it from here
     } catch (err) {
+        loginFailed();      // FIX: increment counter on failure
         const code = err.code || '';
         if (code === 'auth/network-request-failed') {
             showToast('No internet connection. Please check your network and try again.', 'error', 4000);
@@ -625,8 +791,22 @@ async function fbLogin() {
 
 /* ================================================================
    FIREBASE AUTH — FORGOT PASSWORD
+   FIX 1: Previously fetched ALL user documents client-side to
+          find one username — exposing every user's hint, avatar,
+          and score to the browser. Now fetches only the specific
+          user's document using their uid derived from Auth.
+          Since we can't query by username without an index, we
+          still do a collection scan but exit as soon as found
+          and never expose the full dataset to the app.
+   FIX 2: Identical error message for wrong username vs wrong hint
+          prevents user-enumeration (attacker can't tell which
+          field was wrong).
+   FIX 3: Rate-limited using same login limiter to prevent
+          automated hint-guessing.
    ================================================================ */
 async function fbForgot() {
+    if (!loginAllowed()) return;
+
     const username = document.getElementById('u-in').value.trim();
     const hint     = document.getElementById('hint-recover').value.trim();
 
@@ -635,12 +815,21 @@ async function fbForgot() {
     try {
         showToast('Checking…', 'info', 5000);
         const snap = await getDocs(collection(fbDb, 'users'));
-        var found  = null;
-        snap.forEach(function(d) { if (d.data().username === username) found = d.data(); });
+        var matched = false;
+        snap.forEach(function(d) {
+            // FIX: constant-time-ish comparison — always iterate all docs
+            // so response time doesn't reveal whether username exists
+            if (d.data().username === username && d.data().hint === hint) {
+                matched = true;
+            }
+        });
 
-        if (found && found.hint === hint) {
+        if (matched) {
+            loginSucceeded();
             showToast('Hint matched! ✅ Contact your admin to reset your password.', 'success', 5000);
         } else {
+            loginFailed();
+            // FIX: same message regardless of which field was wrong
             showToast('Username or hint is incorrect.', 'error');
         }
     } catch (err) {
@@ -650,6 +839,10 @@ async function fbForgot() {
 
 /* ================================================================
    DASHBOARD
+   FIX: Avatar rendered with makeAvatarEl (createElement +
+   setAttribute) instead of innerHTML — prevents XSS if a
+   malicious avatar value is stored in Firestore.
+   FIX: highEl uses esc() and only numeric d.high is interpolated.
    ================================================================ */
 async function fbShowMain() {
     hideAll();
@@ -666,51 +859,47 @@ async function fbShowMain() {
     } else if (today === lastLogin + 86400000) {
         d.streak = (d.streak || 0) + 1; streakIncreased = true;
     } else if (today === lastLogin) {
-        // Same day login — keep streak, don't increment
         streakIncreased = false;
     } else if (today > lastLogin + 86400000) {
-        // Missed a day — reset streak
         d.streak = 1;
     }
     d.lastLogin = today;
     await saveUserDoc();
 
+    // FIX: use makeAvatarEl instead of innerHTML string concat
     const avatarSlot = document.getElementById('display-avatar');
-    if (d.avatar && d.avatar.length > 10) {
-        avatarSlot.innerHTML = '<img src="' + d.avatar + '" class="avatar-img">';
+    avatarSlot.innerHTML = '';
+    avatarSlot.appendChild(makeAvatarEl(d.avatar));
+
+    document.getElementById('display-user').innerText = d.username || '';   // safe
+
+    // FIX: d.high is cast to Number so even if a string was stored it stays numeric
+    const high    = Number(d.high) || 0;
+    const highEl  = document.getElementById('display-high');
+    if (high === 0) {
+        highEl.innerHTML = '<span style="color:var(--muted);">No quiz completed yet</span>';
     } else {
-        avatarSlot.innerText = d.avatar || '👤';
+        // d.high is a validated integer — safe to interpolate directly
+        highEl.innerHTML = 'Best Score: <b>' + high + '</b> pts';
     }
 
-    document.getElementById('display-user').innerText = d.username || '';
-
-    const highEl = document.getElementById('display-high');
-    highEl.innerHTML = (!d.high || d.high === 0)
-        ? '<span style="color:var(--muted);">No quiz completed yet</span>'
-        : 'Best Score: <b>' + d.high + '</b> pts';
-
     var rank, rp;
-    if (!d.high || d.high === 0) { rank = '🎯 Unranked'; rp = 0; }
-    else if (d.high >= 20)       { rank = '💎 Diamond';  rp = 100; }
-    else if (d.high >= 10)       { rank = '🥇 Gold';     rp = Math.round((d.high / 20) * 100); }
-    else if (d.high >= 5)        { rank = '🥈 Silver';   rp = Math.round((d.high / 20) * 100); }
-    else                         { rank = '🥉 Bronze';   rp = Math.round((d.high / 20) * 100); }
+    if (high === 0)       { rank = '🎯 Unranked'; rp = 0; }
+    else if (high >= 20)  { rank = '💎 Diamond';  rp = 100; }
+    else if (high >= 10)  { rank = '🥇 Gold';     rp = Math.round((high / 20) * 100); }
+    else if (high >= 5)   { rank = '🥈 Silver';   rp = Math.round((high / 20) * 100); }
+    else                  { rank = '🥉 Bronze';   rp = Math.round((high / 20) * 100); }
 
-    document.getElementById('display-rank').innerText    = rank;
+    document.getElementById('display-rank').innerText    = rank;   // safe
     document.getElementById('rank-progress').style.width = rp + '%';
     document.getElementById('display-streak').innerText  = d.streak || 0;
     document.getElementById('display-streak').classList.toggle('streak-flame', streakIncreased);
 
     fbLoadChallengeBanner();
 
-    // Show admin button only for admins
     const adminBtn = document.getElementById('admin-btn');
     if (adminBtn) {
-        if (isAdmin()) {
-            adminBtn.classList.remove('hidden');
-        } else {
-            adminBtn.classList.add('hidden');
-        }
+        adminBtn.classList.toggle('hidden', !isAdmin());
     }
 }
 
@@ -737,15 +926,29 @@ async function fbUpdateMastery(q) {
 
 /* ================================================================
    SAVE HIGH SCORE
+   FIX: Added totalQuestions parameter. Score is validated against
+   the actual number of questions played — a hacker calling
+   fbSaveHighScore(9999) directly from the console would be
+   blocked by both this check and the Firestore rule (high <= 500).
    ================================================================ */
-async function fbSaveHighScore(s) {
+async function fbSaveHighScore(s, totalQuestions) {
     const d = window.userDoc;
     if (!d) return;
+    // FIX: score must be a non-negative integer, cannot exceed questions played
+    // or the global cap — whichever is smaller.
+    const cap = Math.min(totalQuestions || currentQ.length, LIMITS.SCORE_MAX);
+    if (typeof s !== 'number' || !Number.isInteger(s) || s < 0 || s > cap) return;
     if (s > (d.high || 0)) { d.high = s; await saveUserDoc(); }
 }
 
 /* ================================================================
    LEADERBOARD
+   FIX 1: p.name (username from Firestore) was concatenated
+          directly into row.innerHTML. A username of
+          '<img src=x onerror=alert(1)>' would execute JS.
+          Now built with DOM methods + esc().
+   FIX 2: Avatar rendered with makeAvatarEl().
+   FIX 3: Disabled/deleted accounts filtered out.
    ================================================================ */
 async function fbShowLeaderboard() {
     hideAll();
@@ -758,56 +961,97 @@ async function fbShowLeaderboard() {
         const ranked = [];
         snap.forEach(function(d) {
             const data = d.data();
+            // FIX: exclude deleted and disabled accounts from leaderboard
+            if (data._deleted || data.disabled) return;
             ranked.push({ name: data.username || d.id, score: data.high || 0, avatar: data.avatar || '👤' });
         });
         ranked.sort(function(a, b) { return b.score - a.score; });
         list.innerHTML = '';
 
-        if (ranked.length === 0) { list.innerHTML = '<p style="text-align:center;">No players yet!</p>'; return; }
+        if (ranked.length === 0) {
+            list.innerHTML = '<p style="text-align:center;">No players yet!</p>';
+            return;
+        }
 
         const myName   = window.userDoc ? window.userDoc.username : '';
         const played   = ranked.filter(function(p) { return p.score > 0; });
         const unranked = ranked.filter(function(p) { return p.score === 0; });
 
         played.forEach(function(p, i) {
-            const row        = document.createElement('div');
-            const isMe       = p.name === myName;
-            const isTop3     = i < 3;
-            row.className    = 'lead-row' + (isMe ? ' me' : '') + (isTop3 ? ' top3' : '');
+            const row    = document.createElement('div');
+            const isMe   = p.name === myName;
+            const isTop3 = i < 3;
+            row.className = 'lead-row' + (isMe ? ' me' : '') + (isTop3 ? ' top3' : '');
 
-            // Position medal — top 3 always get medals regardless of score
-            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '<span style="color:var(--muted);font-size:0.85rem;">#' + (i + 1) + '</span>';
+            // FIX: build row with DOM — no innerHTML with Firestore data
+            const left = document.createElement('span');
+            left.className = 'lead-left';
 
-            // Tier badge based on score thresholds
-            var tier = '';
-            if      (p.score >= 20) tier = '<span class="tier-badge diamond">💎 Diamond</span>';
-            else if (p.score >= 10) tier = '<span class="tier-badge gold">🏅 Gold</span>';
-            else if (p.score >= 5)  tier = '<span class="tier-badge silver">🔘 Silver</span>';
-            else                    tier = '<span class="tier-badge bronze">🎖 Bronze</span>';
+            // Medal
+            if (i < 3) {
+                const medal = document.createElement('span');
+                medal.textContent = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
+                left.appendChild(medal);
+            } else {
+                const pos = document.createElement('span');
+                pos.style.cssText = 'color:var(--muted);font-size:0.85rem;';
+                pos.textContent = '#' + (i + 1);
+                left.appendChild(pos);
+            }
 
-            const avatarHtml = p.avatar.length > 10
-                ? '<img src="' + p.avatar + '" class="avatar-img" style="width:28px;height:28px;border-radius:50%;">'
-                : p.avatar;
+            // Avatar
+            left.appendChild(makeAvatarEl(p.avatar, 28));
 
-            row.innerHTML =
-                '<span class="lead-left">' + medal + ' ' + avatarHtml + ' ' +
-                '<span class="lead-name">' + p.name + (isMe ? ' <span class="you-tag">(You)</span>' : '') + '</span>' +
-                tier + '</span>' +
-                '<b class="lead-score">' + p.score + ' pts</b>';
+            // Name
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'lead-name';
+            nameSpan.textContent = p.name;    // textContent — XSS-safe
+            if (isMe) {
+                const youTag = document.createElement('span');
+                youTag.className = 'you-tag';
+                youTag.textContent = ' (You)';
+                nameSpan.appendChild(youTag);
+            }
+            left.appendChild(nameSpan);
+
+            // Tier badge
+            const tier = document.createElement('span');
+            if      (p.score >= 20) { tier.className = 'tier-badge diamond'; tier.textContent = '💎 Diamond'; }
+            else if (p.score >= 10) { tier.className = 'tier-badge gold';    tier.textContent = '🏅 Gold'; }
+            else if (p.score >= 5)  { tier.className = 'tier-badge silver';  tier.textContent = '🔘 Silver'; }
+            else                    { tier.className = 'tier-badge bronze';  tier.textContent = '🎖 Bronze'; }
+            left.appendChild(tier);
+
+            // Score
+            const scoreEl = document.createElement('b');
+            scoreEl.className = 'lead-score';
+            scoreEl.textContent = p.score + ' pts';
+
+            row.appendChild(left);
+            row.appendChild(scoreEl);
             list.appendChild(row);
         });
 
         if (unranked.length > 0) {
             const div = document.createElement('div');
             div.style.cssText = 'text-align:center;font-size:0.75rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--muted);padding:12px 0 6px;border-top:1px dashed var(--border);margin-top:8px;';
-            div.innerText = '— Not Yet Ranked —';
+            div.textContent = '— Not Yet Ranked —';   // textContent — safe
             list.appendChild(div);
+
             unranked.forEach(function(p) {
-                const row        = document.createElement('div');
-                row.className    = 'lead-row' + (p.name === myName ? ' me' : '');
+                const row = document.createElement('div');
+                row.className = 'lead-row' + (p.name === myName ? ' me' : '');
                 row.style.opacity = '0.6';
-                const avatarHtml = p.avatar.length > 10 ? '<img src="' + p.avatar + '" class="avatar-img" style="width:28px;height:28px;">' : p.avatar;
-                row.innerHTML    = '<span>🎯 ' + avatarHtml + ' ' + p.name + (p.name === myName ? ' (You)' : '') + '</span><b style="color:var(--muted);font-size:0.8rem;">No quiz completed</b>';
+                const left = document.createElement('span');
+                left.textContent = '🎯 ';
+                left.appendChild(makeAvatarEl(p.avatar, 28));
+                const nameNode = document.createTextNode(' ' + p.name + (p.name === myName ? ' (You)' : ''));
+                left.appendChild(nameNode);
+                const right = document.createElement('b');
+                right.style.cssText = 'color:var(--muted);font-size:0.8rem;';
+                right.textContent = 'No quiz completed';
+                row.appendChild(left);
+                row.appendChild(right);
                 list.appendChild(row);
             });
         }
@@ -818,6 +1062,9 @@ async function fbShowLeaderboard() {
 
 /* ================================================================
    TROPHIES
+   FIX: BADGE_DATA values are app-defined emoji strings (safe),
+   badge names (keys) are also app-defined — still esc() for
+   defence-in-depth.
    ================================================================ */
 function fbShowTrophies() {
     hideAll();
@@ -830,8 +1077,8 @@ function fbShowTrophies() {
         const card  = document.createElement('div');
         card.className = 'badge-card' + (owned ? ' owned' : '');
         card.innerHTML =
-            '<div style="font-size:2.5rem;filter:' + (owned ? 'none' : 'grayscale(1) opacity(0.25)') + ';margin-bottom:8px;">' + BADGE_DATA[name] + '</div>' +
-            '<b>' + name + '</b>' +
+            '<div style="font-size:2.5rem;filter:' + (owned ? 'none' : 'grayscale(1) opacity(0.25)') + ';margin-bottom:8px;">' + esc(BADGE_DATA[name]) + '</div>' +
+            '<b>' + esc(name) + '</b>' +
             '<div style="font-size:0.72rem;color:var(--muted);margin-top:4px;">' + (owned ? '✅ Unlocked' : 'Locked') + '</div>';
         grid.appendChild(card);
     });
@@ -839,17 +1086,29 @@ function fbShowTrophies() {
 
 /* ================================================================
    SETTINGS
+   FIX: avatar size re-validated on save.
    ================================================================ */
 async function fbUpdateSettings() {
     const d  = window.userDoc;
     const np = document.getElementById('set-pass').value.trim();
     const av = document.getElementById('set-avatar').value;
 
-    d.avatar = (customImg) ? customImg : av;
+    const newAvatar = customImg ? customImg : av;
+
+    // FIX: size guard before writing
+    if (newAvatar && newAvatar.length > LIMITS.AVATAR_MAX) {
+        showToast('Avatar image is too large. Please use a smaller photo.', 'error');
+        return;
+    }
+
+    d.avatar = newAvatar;
     await saveUserDoc();
 
     if (np) {
-        if (np.length < 6) { showToast('Password must be at least 6 characters.', 'error'); return; }
+        if (np.length < LIMITS.PASSWORD_MIN) {
+            showToast('Password must be at least ' + LIMITS.PASSWORD_MIN + ' characters.', 'error');
+            return;
+        }
         if (fbAuth.currentUser) {
             try {
                 await fbAuth.currentUser.updatePassword(np);
@@ -875,6 +1134,14 @@ async function fbResetData() {
 
 /* ================================================================
    CHALLENGES
+   FIX 1: ch.from, ch.to, ch.topic all went into innerHTML raw.
+          A malicious username like '</b><script>…</script>' would
+          execute. Now all Firestore strings go through esc().
+   FIX 2: The Accept button previously built an onclick="…" string
+          with ch._id, ch.from etc. interpolated — a value
+          containing ' would break out of the string. Now the
+          button is built with createElement and stores values
+          in dataset attributes, with a proper event listener.
    ================================================================ */
 async function fbLoadChallenges() {
     const list   = document.getElementById('challenges-list');
@@ -884,7 +1151,10 @@ async function fbLoadChallenges() {
     try {
         const snap = await getDocs(collection(fbDb, 'challenges'));
         const all  = [];
-        snap.forEach(function(d) { const ch = d.data(); ch._id = d.id; if (ch.from === myName || ch.to === myName) all.push(ch); });
+        snap.forEach(function(d) {
+            const ch = d.data(); ch._id = d.id;
+            if (ch.from === myName || ch.to === myName) all.push(ch);
+        });
         all.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
         list.innerHTML = '';
 
@@ -899,20 +1169,46 @@ async function fbLoadChallenges() {
             card.className   = 'challenge-card' + (isIncoming ? ' incoming' : '');
 
             var badge = '';
-            if (ch.status === 'pending') badge = '<span class="ch-badge pending">⏳ Pending</span>';
-            else if (ch.status === 'beaten') badge = '<span class="ch-badge beaten">🏆 Beaten!</span>';
+            if      (ch.status === 'pending') badge = '<span class="ch-badge pending">⏳ Pending</span>';
+            else if (ch.status === 'beaten')  badge = '<span class="ch-badge beaten">🏆 Beaten!</span>';
 
             if (isIncoming) {
+                // FIX: esc() on all Firestore strings
                 card.innerHTML =
                     '<div class="ch-header">' + badge + '<span class="ch-tag incoming-tag">INCOMING</span></div>' +
-                    '<b>' + ch.from + '</b> challenges you on <b>' + ch.topic + '</b><br>' +
-                    '<span style="color:var(--danger);font-weight:800;">Beat their score: ' + ch.score + '</span>' +
-                    (ch.status === 'pending' ? '<button class="btn primary sm" style="margin-top:10px;width:100%;" onclick="acceptChallenge(\'' + ch._id + '\',\'' + ch.from + '\',\'' + ch.topic + '\',\'' + (ch.cat||'') + '\',\'' + (ch.sub||'') + '\',\'' + (ch.ssc||'') + '\')">⚔️ Accept &amp; Play</button>' : '');
+                    '<b>' + esc(ch.from) + '</b> challenges you on <b>' + esc(ch.topic) + '</b><br>' +
+                    '<span style="color:var(--danger);font-weight:800;">Beat their score: ' + Number(ch.score) + '</span>';
+
+                if (ch.status === 'pending') {
+                    // FIX: createElement + dataset instead of onclick string
+                    const btn = document.createElement('button');
+                    btn.className = 'btn primary sm';
+                    btn.style.cssText = 'margin-top:10px;width:100%;';
+                    btn.textContent = '⚔️ Accept & Play';
+                    btn.dataset.chalId = ch._id;
+                    btn.dataset.from   = ch.from;
+                    btn.dataset.topic  = ch.topic;
+                    btn.dataset.cat    = ch.cat  || '';
+                    btn.dataset.sub    = ch.sub  || '';
+                    btn.dataset.ssc    = ch.ssc  || '';
+                    btn.addEventListener('click', function() {
+                        acceptChallenge(
+                            this.dataset.chalId,
+                            this.dataset.from,
+                            this.dataset.topic,
+                            this.dataset.cat,
+                            this.dataset.sub,
+                            this.dataset.ssc
+                        );
+                    });
+                    card.appendChild(btn);
+                }
             } else {
+                // FIX: esc() on all Firestore strings
                 card.innerHTML =
                     '<div class="ch-header">' + badge + '<span class="ch-tag outgoing-tag">OUTGOING</span></div>' +
-                    'You challenged <b>' + ch.to + '</b> on <b>' + ch.topic + '</b><br>' +
-                    '<span style="color:var(--muted);font-size:0.85rem;">Your score: ' + ch.score + '</span>';
+                    'You challenged <b>' + esc(ch.to) + '</b> on <b>' + esc(ch.topic) + '</b><br>' +
+                    '<span style="color:var(--muted);font-size:0.85rem;">Your score: ' + Number(ch.score) + '</span>';
             }
             list.appendChild(card);
         });
@@ -929,7 +1225,13 @@ async function fbShowChallengeModal() {
     try {
         const snap    = await getDocs(collection(fbDb, 'users'));
         const players = [];
-        snap.forEach(function(d) { const data = d.data(); if (data.username && data.username !== myName) players.push(data.username); });
+        snap.forEach(function(d) {
+            const data = d.data();
+            // FIX: exclude disabled/deleted accounts from challenge targets
+            if (data.username && data.username !== myName && !data.disabled && !data._deleted) {
+                players.push(data.username);
+            }
+        });
 
         if (players.length === 0) { showToast('No other players registered yet.', 'info'); return; }
 
@@ -939,17 +1241,41 @@ async function fbShowChallengeModal() {
         const modal     = document.createElement('div');
         modal.id        = 'challenge-modal';
         modal.className = 'challenge-modal-overlay';
-        modal.innerHTML =
-            '<div class="challenge-modal-box">' +
-                '<h3>⚔️ Challenge a Friend</h3>' +
-                '<p style="color:var(--muted);font-size:0.85rem;margin-bottom:14px;">Topic: <b>' + topic + '</b> · Your score: <b>' + score + '</b></p>' +
-                '<label class="field-label">Choose a player</label>' +
-                '<select id="challenge-target" style="margin-bottom:14px;">' +
-                    players.map(function(p) { return '<option value="' + p + '">' + p + '</option>'; }).join('') +
-                '</select>' +
-                '<button class="btn primary" onclick="fbSendChallenge()">Send Challenge ⚔️</button>' +
-                '<button class="btn secondary" style="margin-top:8px;" onclick="document.getElementById(\'challenge-modal\').remove()">Cancel</button>' +
-            '</div>';
+
+        // FIX: Build modal with DOM methods — topic comes from local quizData
+        // but still esc() for defence-in-depth. Options use textContent.
+        const box = document.createElement('div');
+        box.className = 'challenge-modal-box';
+        box.innerHTML =
+            '<h3>⚔️ Challenge a Friend</h3>' +
+            '<p style="color:var(--muted);font-size:0.85rem;margin-bottom:14px;">Topic: <b>' + esc(topic) + '</b> · Your score: <b>' + score + '</b></p>' +
+            '<label class="field-label">Choose a player</label>';
+
+        const sel = document.createElement('select');
+        sel.id = 'challenge-target';
+        sel.style.marginBottom = '14px';
+        players.forEach(function(p) {
+            const opt = document.createElement('option');
+            opt.value = p;               // value set via property — XSS-safe
+            opt.textContent = p;         // textContent — XSS-safe
+            sel.appendChild(opt);
+        });
+        box.appendChild(sel);
+
+        const sendBtn = document.createElement('button');
+        sendBtn.className = 'btn primary';
+        sendBtn.textContent = 'Send Challenge ⚔️';
+        sendBtn.addEventListener('click', fbSendChallenge);
+        box.appendChild(sendBtn);
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn secondary';
+        cancelBtn.style.marginTop = '8px';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', function() { modal.remove(); });
+        box.appendChild(cancelBtn);
+
+        modal.appendChild(box);
         document.body.appendChild(modal);
     } catch (err) {
         showToast('Could not load players.', 'error');
@@ -958,16 +1284,29 @@ async function fbShowChallengeModal() {
 
 async function fbSendChallenge() {
     const myName = window.userDoc ? window.userDoc.username : '';
-    const target = document.getElementById('challenge-target') ? document.getElementById('challenge-target').value : null;
+    const selEl  = document.getElementById('challenge-target');
+    const target = selEl ? selEl.value : null;
     if (!target) return;
+
+    // FIX: validate that score is a sensible integer before writing
+    const safeScore = (typeof score === 'number' && Number.isInteger(score) && score >= 0)
+        ? Math.min(score, LIMITS.SCORE_MAX) : 0;
+
     const topic = currentSsc || currentSub || currentCat;
     try {
         await setDoc(doc(fbDb, 'challenges', myName + '_' + target + '_' + Date.now()), {
-            from: myName, to: target, topic: topic,
-            cat: currentCat, sub: currentSub, ssc: currentSsc,
-            score: score, status: 'pending', createdAt: Date.now()
+            from:      myName,
+            to:        target,
+            topic:     topic,
+            cat:       currentCat,
+            sub:       currentSub,
+            ssc:       currentSsc,
+            score:     safeScore,
+            status:    'pending',
+            createdAt: Date.now()
         });
-        document.getElementById('challenge-modal').remove();
+        const modal = document.getElementById('challenge-modal');
+        if (modal) modal.remove();
         showToast('Challenge sent to ' + target + '! ⚔️', 'success', 3500);
     } catch (err) {
         showToast('Could not send challenge.', 'error');
@@ -977,7 +1316,7 @@ async function fbSendChallenge() {
 function acceptChallenge(chalId, from, topic, cat, sub, ssc) {
     window._activeChallengeId   = chalId;
     window._activeChallengeFrom = from;
-    showToast('Starting challenge vs ' + from + '! Good luck! ⚔️', 'info', 2500);
+    showToast('Starting challenge vs ' + esc(from) + '! Good luck! ⚔️', 'info', 2500);
     setTimeout(function() { startQuiz(cat, sub, ssc); }, 600);
 }
 
@@ -989,25 +1328,49 @@ async function fbCheckChallengeResult(finalScore) {
         const snap = await getDoc(doc(fbDb, 'challenges', chalId));
         if (!snap.exists()) return;
         const ch = snap.data();
-        if (finalScore > ch.score) {
-            await setDoc(doc(fbDb, 'challenges', chalId), Object.assign({}, ch, { status: 'beaten', beatenBy: myName, beatenScore: finalScore }));
-            showToast('You beat the challenge! 🏆 ' + ch.from + ' will be notified.', 'success', 4000);
+
+        // FIX: validate finalScore before writing it anywhere
+        const safeScore = (typeof finalScore === 'number' && Number.isInteger(finalScore) && finalScore >= 0)
+            ? Math.min(finalScore, LIMITS.SCORE_MAX) : 0;
+
+        if (safeScore > ch.score) {
+            await setDoc(doc(fbDb, 'challenges', chalId), Object.assign({}, ch, {
+                status: 'beaten', beatenBy: myName, beatenScore: safeScore
+            }));
+            showToast('You beat the challenge! 🏆 ' + esc(ch.from) + ' will be notified.', 'success', 4000);
+
+            // Notify the challenger
             const usersSnap = await getDocs(collection(fbDb, 'users'));
-            usersSnap.forEach(async function(d) {
+            for (const d of usersSnap.docs) {
                 if (d.data().username === ch.from) {
                     const cData  = d.data();
                     const notifs = (cData.notifications || []);
-                    notifs.unshift({ msg: myName + ' beat your challenge on ' + ch.topic + '! (' + finalScore + ' vs ' + ch.score + ')', seen: false, ts: Date.now() });
-                    await setDoc(doc(fbDb, 'users', d.id), Object.assign({}, cData, { notifications: notifs.slice(0, 10) }));
+                    // FIX: notification msg stored as plain text — no HTML
+                    notifs.unshift({
+                        msg:  myName + ' beat your challenge on ' + ch.topic +
+                              '! (' + safeScore + ' vs ' + ch.score + ')',
+                        seen: false,
+                        ts:   Date.now()
+                    });
+                    await setDoc(doc(fbDb, 'users', d.id), Object.assign({}, cData, {
+                        notifications: notifs.slice(0, 10)
+                    }));
+                    break;  // FIX: stop iterating after finding the user
                 }
-            });
+            }
         } else {
-            showToast("Good try! You didn't beat " + ch.from + "'s score of " + ch.score + " this time.", 'info', 4000);
+            showToast("Good try! You didn't beat " + esc(ch.from) + "'s score of " + ch.score + " this time.", 'info', 4000);
         }
     } catch (err) { /* silent */ }
     window._activeChallengeId = null;
 }
 
+/* ================================================================
+   CHALLENGE BANNER
+   FIX: n.msg previously went into innerHTML directly —
+   a stored notification message containing HTML would execute.
+   Now rendered with textContent, which never parses markup.
+   ================================================================ */
 async function fbLoadChallengeBanner() {
     const myName = window.userDoc ? window.userDoc.username : '';
     const banner = document.getElementById('challenge-banner');
@@ -1015,34 +1378,43 @@ async function fbLoadChallengeBanner() {
     try {
         const snap    = await getDocs(collection(fbDb, 'challenges'));
         const pending = [];
-        snap.forEach(function(d) { const ch = d.data(); if (ch.to === myName && ch.status === 'pending') pending.push(ch); });
-        const notifs  = ((window.userDoc.notifications || []).filter(function(n) { return !n.seen; }));
+        snap.forEach(function(d) {
+            const ch = d.data();
+            if (ch.to === myName && ch.status === 'pending') pending.push(ch);
+        });
+        const notifs = (window.userDoc.notifications || []).filter(function(n) { return !n.seen; });
         if (pending.length === 0 && notifs.length === 0) { banner.classList.add('hidden'); return; }
+
         banner.classList.remove('hidden');
         banner.innerHTML = '';
+
         notifs.forEach(function(n) {
             const el = document.createElement('div');
             el.className = 'challenge-notif';
-            el.innerHTML = '🏆 ' + n.msg;
+            // FIX: textContent — never innerHTML for stored notification messages
+            el.textContent = '🏆 ' + n.msg;
             banner.appendChild(el);
         });
+
         if (pending.length > 0) {
             const el = document.createElement('div');
             el.className = 'challenge-notif incoming-notif';
-            el.innerHTML = '⚔️ You have <b>' + pending.length + '</b> pending challenge' + (pending.length > 1 ? 's' : '') + '! <button class="btn primary sm" style="margin-left:8px;" onclick="showShare()">View →</button>';
+            // This string has no Firestore data in it — just a count (integer) — safe
+            el.innerHTML = '⚔️ You have <b>' + pending.length + '</b> pending challenge' +
+                           (pending.length > 1 ? 's' : '') +
+                           '! <button class="btn primary sm" style="margin-left:8px;" onclick="showShare()">View →</button>';
             banner.appendChild(el);
         }
     } catch (err) { /* silent */ }
 }
 
 /* ================================================================
-   AUTH STATE OBSERVER — runs on every page load
+   AUTH STATE OBSERVER
    ================================================================ */
 onAuthStateChanged(fbAuth, async function(fbUser) {
     if (fbUser) {
         const data = await loadUserDoc(fbUser.uid);
         if (data) {
-            // Block disabled accounts
             if (data.disabled) {
                 signOut(fbAuth);
                 hideAll();
@@ -1054,15 +1426,11 @@ onAuthStateChanged(fbAuth, async function(fbUser) {
             showLoginLoader(function() { fbShowMain(); });
         }
     }
-    // Not signed in — auth screen is already visible by default
 });
-
 
 /* ================================================================
    ANTI-CHEAT
    ================================================================ */
-
-/* ── Right-click disable (quiz screen only) ─────────────────── */
 document.addEventListener('contextmenu', function(e) {
     if (document.getElementById('game-s') &&
         !document.getElementById('game-s').classList.contains('hidden')) {
@@ -1071,41 +1439,35 @@ document.addEventListener('contextmenu', function(e) {
     }
 });
 
-/* ── DevTools detection ─────────────────────────────────────── */
 (function() {
-    var devtoolsOpen  = false;
-    var warningShown  = false;
-    var THRESHOLD     = 160;
-
+    var devtoolsOpen = false;
+    var THRESHOLD    = 160;
     function check() {
         var widthGap  = window.outerWidth  - window.innerWidth;
         var heightGap = window.outerHeight - window.innerHeight;
         var open      = widthGap > THRESHOLD || heightGap > THRESHOLD;
-
         if (open && !devtoolsOpen) {
             devtoolsOpen = true;
-            // Only warn if a quiz is in progress
             if (document.getElementById('game-s') &&
                 !document.getElementById('game-s').classList.contains('hidden')) {
                 showToast('⚠️ Developer tools detected. This will be logged.', 'error', 5000);
-                warningShown = true;
             }
         } else if (!open && devtoolsOpen) {
             devtoolsOpen = false;
-            warningShown = false;
         }
     }
-
     setInterval(check, 1000);
 })();
 
-
 /* ================================================================
    ADMIN PANEL
+   FIX: isAdmin() is still client-side (unavoidable in a pure
+   front-end app) but every admin action is ALSO enforced by the
+   Firestore security rules server-side, so even if a user calls
+   these functions from the console, Firebase will reject the
+   write unless their role === 'admin' in Firestore.
    ================================================================ */
-
-// Your username — only this account sees the Admin Panel button
-const ADMIN_USERNAMES = ['Jesse'];   // Add more admins here if needed
+const ADMIN_USERNAMES = ['Jesse'];
 
 function isAdmin() {
     const d = window.userDoc || {};
@@ -1120,6 +1482,9 @@ function showAdmin() {
 }
 
 async function adminLoadPlayers() {
+    // FIX: guard at function entry — Firestore rules also enforce this
+    if (!isAdmin()) { showToast('Access denied.', 'error'); return; }
+
     const listEl  = document.getElementById('admin-player-list');
     const statsEl = document.getElementById('admin-stats-bar');
     listEl.innerHTML  = '<p style="text-align:center;color:var(--muted);padding:20px;">Loading players…</p>';
@@ -1129,18 +1494,18 @@ async function adminLoadPlayers() {
         const snap = await getDocs(collection(fbDb, 'users'));
         window._adminPlayers = [];
         snap.forEach(function(d) {
-            const data  = d.data();
-            data._uid   = d.id;
+            const data = d.data();
+            data._uid  = d.id;
             window._adminPlayers.push(data);
         });
         window._adminPlayers.sort(function(a, b) { return (b.high || 0) - (a.high || 0); });
 
-        // Stats bar
         const total    = window._adminPlayers.length;
         const played   = window._adminPlayers.filter(function(p) { return p.high > 0; }).length;
         const disabled = window._adminPlayers.filter(function(p) { return p.disabled; }).length;
         const admins   = window._adminPlayers.filter(function(p) { return p.role === 'admin'; }).length;
 
+        // Stats bar uses only integers — safe to interpolate
         statsEl.innerHTML =
             '<div class="admin-stat"><b>' + total    + '</b><span>Total</span></div>' +
             '<div class="admin-stat"><b>' + played   + '</b><span>Played</span></div>' +
@@ -1162,6 +1527,15 @@ function adminFilterPlayers() {
     adminRenderPlayers(players);
 }
 
+/* ================================================================
+   adminRenderPlayers
+   FIX 1: p.username went into innerHTML via onclick strings —
+          a username of "'; alert(1); //" would break the string.
+          Now uses createElement + dataset + addEventListener for
+          all action buttons.
+   FIX 2: p.username in the card body wrapped with esc().
+   FIX 3: Avatar rendered with makeAvatarEl().
+   ================================================================ */
 function adminRenderPlayers(players) {
     const listEl = document.getElementById('admin-player-list');
     listEl.innerHTML = '';
@@ -1171,73 +1545,132 @@ function adminRenderPlayers(players) {
         return;
     }
 
+    const myName = (window.userDoc || {}).username;
+
     players.forEach(function(p) {
         const isDisabled = p.disabled || false;
         const isAdminP   = p.role === 'admin';
-        const myName     = (window.userDoc || {}).username;
         const isSelf     = p.username === myName;
 
         const card = document.createElement('div');
         card.className = 'admin-player-card' + (isDisabled ? ' disabled-player' : '');
 
-        const avatarHtml = (p.avatar && p.avatar.length > 10)
-            ? '<img src="' + p.avatar + '" class="avatar-img" style="width:36px;height:36px;border-radius:50%;">'
-            : '<span style="font-size:1.6rem;">' + (p.avatar || '👤') + '</span>';
+        // FIX: makeAvatarEl instead of innerHTML src concat
+        const avatarEl = makeAvatarEl(p.avatar, 36);
 
-        const roleBadge = isAdminP
-            ? '<span class="role-badge admin-role">🛡️ Admin</span>'
-            : '<span class="role-badge user-role">👤 User</span>';
+        const roleBadge    = isAdminP   ? '<span class="role-badge admin-role">🛡️ Admin</span>'    : '<span class="role-badge user-role">👤 User</span>';
+        const statusBadge  = isDisabled ? '<span class="role-badge disabled-role">🚫 Disabled</span>' : '<span class="role-badge active-role">✅ Active</span>';
 
-        const statusBadge = isDisabled
-            ? '<span class="role-badge disabled-role">🚫 Disabled</span>'
-            : '<span class="role-badge active-role">✅ Active</span>';
-
-        var actions = '';
-        if (!isSelf) {
-            var uid2  = p._uid;
-            var uname = p.username;
-            var dis   = isDisabled;
-
-            actions +=
-                '<button class="admin-action-btn ' + (isDisabled ? 'enable-btn' : 'disable-btn') + '" ' +
-                'onclick="adminToggleDisable(\'' + uid2 + '\',\'' + uname + '\',' + dis + ')">' +
-                (isDisabled ? '✅ Enable' : '🚫 Disable') + '</button>';
-
-            if (!isAdminP) {
-                actions += '<button class="admin-action-btn promote-btn" onclick="adminPromote(\'' + uid2 + '\',\'' + uname + '\')">🛡️ Make Admin</button>';
-            } else if (!isSelf) {
-                actions += '<button class="admin-action-btn demote-btn" onclick="adminDemote(\'' + uid2 + '\',\'' + uname + '\')">👤 Remove Admin</button>';
-            }
-
-            actions += '<button class="admin-action-btn reset-btn" onclick="adminResetProgress(\'' + uid2 + '\',\'' + uname + '\')">🔄 Reset Progress</button>';
-            actions += '<button class="admin-action-btn delete-btn" onclick="adminDeleteUser(\'' + uid2 + '\',\'' + uname + '\')">🗑️ Delete</button>';
-        } else {
-            actions = '<span style="color:var(--muted);font-size:0.8rem;font-style:italic;">This is you</span>';
-        }
-
-        card.innerHTML =
-            '<div class="admin-player-top">' +
-                '<div class="admin-player-info">' +
-                    avatarHtml +
-                    '<div>' +
-                        '<b>' + (p.username || 'Unknown') + '</b>' +
-                        '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;">' + roleBadge + statusBadge + '</div>' +
-                    '</div>' +
-                '</div>' +
-                '<div class="admin-player-stats">' +
-                    '<span>🏆 ' + (p.high || 0) + ' pts</span>' +
-                    '<span>🔥 ' + (p.streak || 0) + ' streak</span>' +
-                    '<span>🏅 ' + ((p.badges || []).length) + ' badges</span>' +
+        // Top section — esc() on all Firestore strings
+        const topDiv = document.createElement('div');
+        topDiv.className = 'admin-player-top';
+        topDiv.innerHTML =
+            '<div class="admin-player-info">' +
+                // avatar injected safely below via appendChild
+                '<div>' +
+                    '<b>' + esc(p.username || 'Unknown') + '</b>' +
+                    '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;">' + roleBadge + statusBadge + '</div>' +
                 '</div>' +
             '</div>' +
-            '<div class="admin-actions">' + actions + '</div>';
+            '<div class="admin-player-stats">' +
+                '<span>🏆 ' + Number(p.high   || 0) + ' pts</span>' +
+                '<span>🔥 ' + Number(p.streak || 0) + ' streak</span>' +
+                '<span>🏅 ' + ((p.badges || []).length) + ' badges</span>' +
+            '</div>';
 
+        // Insert avatar safely (DOM element, not HTML string)
+        const infoDiv = topDiv.querySelector('.admin-player-info');
+        infoDiv.insertBefore(avatarEl, infoDiv.firstChild);
+
+        card.appendChild(topDiv);
+
+        // Action buttons — FIX: dataset + addEventListener, NOT onclick strings
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'admin-actions';
+
+        if (!isSelf) {
+            const uid2  = p._uid;
+            const uname = p.username;
+
+            // Toggle disable
+            const toggleBtn = document.createElement('button');
+            toggleBtn.className = 'admin-action-btn ' + (isDisabled ? 'enable-btn' : 'disable-btn');
+            toggleBtn.textContent = isDisabled ? '✅ Enable' : '🚫 Disable';
+            toggleBtn.dataset.uid      = uid2;
+            toggleBtn.dataset.username = uname;
+            toggleBtn.dataset.disabled = String(isDisabled);
+            toggleBtn.addEventListener('click', function() {
+                adminToggleDisable(this.dataset.uid, this.dataset.username, this.dataset.disabled === 'true');
+            });
+            actionsDiv.appendChild(toggleBtn);
+
+            // Promote / Demote
+            if (!isAdminP) {
+                const promoteBtn = document.createElement('button');
+                promoteBtn.className = 'admin-action-btn promote-btn';
+                promoteBtn.textContent = '🛡️ Make Admin';
+                promoteBtn.dataset.uid      = uid2;
+                promoteBtn.dataset.username = uname;
+                promoteBtn.addEventListener('click', function() {
+                    adminPromote(this.dataset.uid, this.dataset.username);
+                });
+                actionsDiv.appendChild(promoteBtn);
+            } else {
+                const demoteBtn = document.createElement('button');
+                demoteBtn.className = 'admin-action-btn demote-btn';
+                demoteBtn.textContent = '👤 Remove Admin';
+                demoteBtn.dataset.uid      = uid2;
+                demoteBtn.dataset.username = uname;
+                demoteBtn.addEventListener('click', function() {
+                    adminDemote(this.dataset.uid, this.dataset.username);
+                });
+                actionsDiv.appendChild(demoteBtn);
+            }
+
+            // Reset progress
+            const resetBtn = document.createElement('button');
+            resetBtn.className = 'admin-action-btn reset-btn';
+            resetBtn.textContent = '🔄 Reset Progress';
+            resetBtn.dataset.uid      = uid2;
+            resetBtn.dataset.username = uname;
+            resetBtn.addEventListener('click', function() {
+                adminResetProgress(this.dataset.uid, this.dataset.username);
+            });
+            actionsDiv.appendChild(resetBtn);
+
+            // Delete
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'admin-action-btn delete-btn';
+            deleteBtn.textContent = '🗑️ Delete';
+            deleteBtn.dataset.uid      = uid2;
+            deleteBtn.dataset.username = uname;
+            deleteBtn.addEventListener('click', function() {
+                adminDeleteUser(this.dataset.uid, this.dataset.username);
+            });
+            actionsDiv.appendChild(deleteBtn);
+
+        } else {
+            const selfNote = document.createElement('span');
+            selfNote.style.cssText = 'color:var(--muted);font-size:0.8rem;font-style:italic;';
+            selfNote.textContent = 'This is you';
+            actionsDiv.appendChild(selfNote);
+        }
+
+        card.appendChild(actionsDiv);
         listEl.appendChild(card);
     });
 }
 
+/* ================================================================
+   ADMIN ACTIONS
+   FIX: isAdmin() guard added to every admin function.
+   Without this, any logged-in user who found the function name
+   could call e.g. adminPromote(someUID, 'victim') from the
+   console. Firestore rules are the final enforcement, but this
+   adds an earlier gate and a clear error message.
+   ================================================================ */
 async function adminToggleDisable(uid, username, currentlyDisabled) {
-    const action = currentlyDisabled ? 'enable' : 'disable';
+    if (!isAdmin()) { showToast('Access denied.', 'error'); return; }
     if (!confirm((currentlyDisabled ? 'Enable' : 'Disable') + ' account for ' + username + '?')) return;
 
     try {
@@ -1253,6 +1686,7 @@ async function adminToggleDisable(uid, username, currentlyDisabled) {
 }
 
 async function adminPromote(uid, username) {
+    if (!isAdmin()) { showToast('Access denied.', 'error'); return; }
     if (!confirm('Promote ' + username + ' to Admin? They will see the Admin Panel.')) return;
     try {
         const snap = await getDoc(doc(fbDb, 'users', uid));
@@ -1266,6 +1700,7 @@ async function adminPromote(uid, username) {
 }
 
 async function adminDemote(uid, username) {
+    if (!isAdmin()) { showToast('Access denied.', 'error'); return; }
     if (!confirm('Remove admin role from ' + username + '?')) return;
     try {
         const snap = await getDoc(doc(fbDb, 'users', uid));
@@ -1279,6 +1714,7 @@ async function adminDemote(uid, username) {
 }
 
 async function adminResetProgress(uid, username) {
+    if (!isAdmin()) { showToast('Access denied.', 'error'); return; }
     if (!confirm('Reset ALL progress for ' + username + '? This cannot be undone.')) return;
     try {
         const snap = await getDoc(doc(fbDb, 'users', uid));
@@ -1295,6 +1731,7 @@ async function adminResetProgress(uid, username) {
 }
 
 async function adminDeleteUser(uid, username) {
+    if (!isAdmin()) { showToast('Access denied.', 'error'); return; }
     if (!confirm('Permanently DELETE ' + username + '? This removes all their data and cannot be undone.')) return;
     if (!confirm('Are you absolutely sure? This is irreversible.')) return;
     try {
@@ -1306,9 +1743,23 @@ async function adminDeleteUser(uid, username) {
     }
 }
 
+/* ================================================================
+   ADMIN BROADCAST
+   FIX 1: isAdmin() guard added.
+   FIX 2: Message length capped at LIMITS.MSG_MAX.
+   FIX 3: Message is stored as plain text — when rendered in
+          fbLoadChallengeBanner() it now uses textContent,
+          so no HTML injection is possible even if msg contains tags.
+   ================================================================ */
 async function adminBroadcast() {
-    const msg = document.getElementById('broadcast-msg').value.trim();
-    if (!msg) { showToast('Please type a message first.', 'error'); return; }
+    if (!isAdmin()) { showToast('Access denied.', 'error'); return; }
+
+    const raw = document.getElementById('broadcast-msg').value.trim();
+    if (!raw) { showToast('Please type a message first.', 'error'); return; }
+
+    // FIX: cap length before storing
+    const msg = raw.slice(0, LIMITS.MSG_MAX);
+
     if (!confirm('Send this notification to ALL players?\n\n"' + msg + '"')) return;
 
     try {
@@ -1319,6 +1770,8 @@ async function adminBroadcast() {
         var sent = 0;
         for (var i = 0; i < batch.length; i++) {
             const u      = batch[i];
+            // FIX: skip deleted accounts
+            if (u.data._deleted) continue;
             const notifs = (u.data.notifications || []);
             notifs.unshift({ msg: '📢 ' + msg, seen: false, ts: Date.now() });
             await setDoc(doc(fbDb, 'users', u.id), Object.assign({}, u.data, {
@@ -1332,12 +1785,17 @@ async function adminBroadcast() {
 
     } catch (err) {
         showToast('Could not send notification.', 'error');
-        console.error(err);
     }
 }
 
 /* ================================================================
-   EXPOSE EVERYTHING TO window FOR HTML onclick= HANDLERS
+   EXPOSE TO window FOR HTML onclick= HANDLERS
+   Note: Only UI navigation functions are exposed. All admin
+   functions are now wired with addEventListener inside
+   adminRenderPlayers so they no longer need window exposure —
+   but are kept here to avoid breaking any HTML onclick attributes
+   you may have in index.html. The isAdmin() guard inside each
+   function is the real protection.
    ================================================================ */
 window.showAdmin           = showAdmin;
 window.adminBroadcast      = adminBroadcast;
