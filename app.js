@@ -3,7 +3,7 @@ import { initializeApp }
 import { getAuth, createUserWithEmailAndPassword,
          signInWithEmailAndPassword, signOut, onAuthStateChanged }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs, collectionGroup }
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 import { initializeAppCheck, ReCaptchaV3Provider }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app-check.js";
@@ -672,26 +672,24 @@ async function saveUserDoc() {
 
 /* ================================================================
    PUBLIC PROFILE — leaderboard-safe subset of the user document.
-   Written to users/{uid}/public/profile whenever score, streak,
-   badges or avatar change. The Firestore rule allows any signed-in
-   user to READ this subcollection, so fbShowLeaderboard() can
-   query it without needing access to the full private user doc.
-   Failures are swallowed — a missing profile just means the user
-   won't appear on the leaderboard until the next score save.
+   Written to the top-level leaderboard/{uid} collection whenever
+   score, streak, badges or avatar change. Any signed-in user can
+   read this collection (see Firestore rules), so fbShowLeaderboard
+   can query it without touching the private user document.
    ================================================================ */
 async function savePublicProfile() {
     if (!window.userDoc || !window.userDoc._uid) return;
     const uid = window.userDoc._uid;
     const d   = window.userDoc;
     try {
-        await setDoc(doc(fbDb, 'users', uid, 'public', 'profile'), {
+        await setDoc(doc(fbDb, 'leaderboard', uid), {
             username: d.username || '',
             avatar:   d.avatar   || '👤',
             high:     Number(d.high)   || 0,
             streak:   Number(d.streak) || 0,
             badges:   d.badges         || []
         });
-    } catch (e) { /* silent — public profile is supplementary */ }
+    } catch (e) { /* silent — leaderboard profile is supplementary */ }
 }
 
 /* ================================================================
@@ -777,9 +775,9 @@ async function fbRegister() {
         // exposing the full user document).
         await setDoc(doc(fbDb, 'usernames', username), { uid, hint });
 
-        // FIX: Write the public leaderboard profile so this user appears
+        // FIX: Write the leaderboard entry so this user appears
         // on the leaderboard immediately after registering.
-        await setDoc(doc(fbDb, 'users', uid, 'public', 'profile'), {
+        await setDoc(doc(fbDb, 'leaderboard', uid), {
             username,
             avatar: finalAvatar || '👤',
             high:   0,
@@ -990,12 +988,12 @@ async function fbSaveHighScore(s, totalQuestions) {
 
 /* ================================================================
    LEADERBOARD
-   FIX: Now reads from users/{uid}/public/profile subcollections
-   via collectionGroup('profile') instead of reading all private
-   user documents. This works with the Firestore rule:
-     match /users/{userId}/public/profile { allow read: if isSignedIn(); }
-   The private user doc (with hint, inviteCode, notifications) is
-   never touched by this function.
+   Reads from the top-level leaderboard/{uid} collection which
+   contains only public fields: username, avatar, high, streak,
+   badges. Any signed-in user can read this collection per the
+   Firestore rule:  match /leaderboard/{uid} { allow read: if isSignedIn(); }
+   Private user data (hint, inviteCode, notifications) is never
+   touched by this function.
    ================================================================ */
 async function fbShowLeaderboard() {
     hideAll();
@@ -1004,18 +1002,15 @@ async function fbShowLeaderboard() {
     list.innerHTML = '<p style="text-align:center;color:var(--muted);">Loading…</p>';
 
     try {
-        // FIX: collectionGroup reads ALL public/profile subcollections in one query
-        const snap   = await getDocs(collectionGroup(fbDb, 'profile'));
+        const snap   = await getDocs(collection(fbDb, 'leaderboard'));
         const ranked = [];
         snap.forEach(function(d) {
             const data = d.data();
-            // collectionGroup may match other 'profile' subcollections in future;
-            // guard by checking for required leaderboard fields.
-            if (typeof data.username !== 'string') return;
+            if (typeof data.username !== 'string' || !data.username) return;
             ranked.push({
-                name:   data.username || d.id,
-                score:  data.high     || 0,
-                avatar: data.avatar   || '👤'
+                name:   data.username,
+                score:  data.high   || 0,
+                avatar: data.avatar || '👤'
             });
         });
         ranked.sort(function(a, b) { return b.score - a.score; });
@@ -1277,8 +1272,8 @@ async function fbShowChallengeModal() {
     if (!topic) { showToast('Finish a quiz first to challenge someone!', 'error'); return; }
 
     try {
-        // FIX: read public profiles (collectionGroup) instead of private user docs
-        const snap    = await getDocs(collectionGroup(fbDb, 'profile'));
+        // FIX: read from leaderboard collection (public) instead of private user docs
+        const snap    = await getDocs(collection(fbDb, 'leaderboard'));
         const players = [];
         snap.forEach(function(d) {
             const data = d.data();
@@ -1782,8 +1777,8 @@ async function adminResetProgress(uid, username) {
         await setDoc(doc(fbDb, 'users', uid), Object.assign({}, data, {
             high: 0, streak: 0, mastery: {}, badges: [], notifications: []
         }));
-        // FIX: also reset the public leaderboard profile so the reset is reflected immediately
-        await setDoc(doc(fbDb, 'users', uid, 'public', 'profile'), {
+        // FIX: also reset the leaderboard doc so the reset is reflected immediately
+        await setDoc(doc(fbDb, 'leaderboard', uid), {
             username: data.username || '',
             avatar:   data.avatar   || '👤',
             high:     0,
