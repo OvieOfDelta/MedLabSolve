@@ -578,13 +578,12 @@ label.field-label {
 
 /* FIX 5: Added missing closing brace to login-footer */
 .login-footer {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    padding: 20px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  font-size: 0.82rem;
 }
-
 /* ============================================================
    TOAST NOTIFICATION
    ============================================================ */
