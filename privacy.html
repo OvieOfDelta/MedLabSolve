@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Privacy Policy — MedLabSolve</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg: #f5f4f0;
+      --surface: #ffffff;
+      --ink: #0f1923;
+      --ink-muted: #4a5568;
+      --teal: #0a7c6e;
+      --teal-light: #e6f4f2;
+      --teal-mid: #c0e2de;
+      --red: #c0392b;
+      --border: #d6d3cc;
+      --accent-line: #0a7c6e;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      font-size: 16px;
+      line-height: 1.75;
+      min-height: 100vh;
+    }
+
+    /* ─── HEADER ─────────────────────────────────────── */
+    header {
+      background: var(--ink);
+      color: #fff;
+      padding: 0 clamp(1.5rem, 5vw, 6rem);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 72px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      border-bottom: 3px solid var(--teal);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+
+    .logo-icon {
+      width: 36px; height: 36px;
+      background: var(--teal);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+
+    .logo-text {
+      font-family: 'DM Serif Display', serif;
+      font-size: 1.3rem;
+      color: #fff;
+      letter-spacing: -0.01em;
+    }
+
+    .logo-text span { color: var(--teal); }
+
+    .back-link {
+      font-size: 0.82rem;
+      color: rgba(255,255,255,0.55);
+      text-decoration: none;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      transition: color 0.2s;
+    }
+    .back-link:hover { color: var(--teal); }
+
+    /* ─── HERO BANNER ────────────────────────────────── */
+    .hero {
+      background: var(--ink);
+      color: #fff;
+      padding: clamp(3rem, 8vw, 6rem) clamp(1.5rem, 5vw, 6rem) clamp(2.5rem, 6vw, 5rem);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: 'PRIVACY';
+      position: absolute;
+      right: -1rem; bottom: -2.5rem;
+      font-family: 'DM Serif Display', serif;
+      font-size: clamp(6rem, 16vw, 14rem);
+      color: rgba(255,255,255,0.04);
+      pointer-events: none;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .hero-eyebrow {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      letter-spacing: 0.18em;
+      color: var(--teal);
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .hero-eyebrow::before {
+      content: '';
+      display: inline-block;
+      width: 28px; height: 2px;
+      background: var(--teal);
+    }
+
+    .hero h1 {
+      font-family: 'DM Serif Display', serif;
+      font-size: clamp(2.4rem, 6vw, 5rem);
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+      max-width: 700px;
+      margin-bottom: 1.5rem;
+    }
+
+    .hero h1 em {
+      font-style: italic;
+      color: var(--teal);
+    }
+
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      margin-top: 2rem;
+    }
+
+    .meta-chip {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 4px;
+      padding: 6px 14px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: rgba(255,255,255,0.7);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .meta-chip strong { color: #fff; }
+
+    /* ─── LAYOUT ─────────────────────────────────────── */
+    .page-wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: clamp(2rem, 5vw, 4rem) clamp(1.5rem, 5vw, 3rem);
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 4rem;
+      align-items: start;
+    }
+
+    @media (max-width: 780px) {
+      .page-wrap { grid-template-columns: 1fr; gap: 2rem; }
+      .toc { display: none; }
+    }
+
+    /* ─── TABLE OF CONTENTS ──────────────────────────── */
+    .toc {
+      position: sticky;
+      top: 96px;
+    }
+
+    .toc-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin-bottom: 1rem;
+    }
+
+    .toc ol {
+      list-style: none;
+      counter-reset: toc;
+      border-left: 2px solid var(--border);
+    }
+
+    .toc ol li {
+      counter-increment: toc;
+      padding: 5px 0 5px 16px;
+    }
+
+    .toc ol li a {
+      text-decoration: none;
+      color: var(--ink-muted);
+      font-size: 0.82rem;
+      font-weight: 400;
+      transition: color 0.2s;
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+    }
+
+    .toc ol li a::before {
+      content: counter(toc, decimal-leading-zero);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      color: var(--teal);
+      flex-shrink: 0;
+    }
+
+    .toc ol li a:hover { color: var(--teal); }
+
+    .toc-ndpr {
+      margin-top: 2rem;
+      background: var(--teal-light);
+      border: 1px solid var(--teal-mid);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .toc-ndpr p {
+      font-size: 0.75rem;
+      color: var(--teal);
+      font-weight: 500;
+      line-height: 1.5;
+    }
+
+    /* ─── CONTENT ────────────────────────────────────── */
+    .content > * + * { margin-top: 2.5rem; }
+
+    /* intro card */
+    .intro-card {
+      background: var(--teal);
+      color: #fff;
+      border-radius: 12px;
+      padding: 2rem 2.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .intro-card::after {
+      content: '🔬';
+      position: absolute;
+      right: 1.5rem; top: 50%;
+      transform: translateY(-50%);
+      font-size: 5rem;
+      opacity: 0.15;
+    }
+    .intro-card p {
+      font-size: 1rem;
+      line-height: 1.8;
+      color: rgba(255,255,255,0.9);
+      max-width: 560px;
+    }
+    .intro-card strong { color: #fff; }
+
+    /* sections */
+    .section {
+      background: var(--surface);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1.4rem 2rem;
+      border-bottom: 1px solid var(--border);
+      background: #fafaf8;
+    }
+
+    .section-number {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--teal);
+      background: var(--teal-light);
+      border: 1px solid var(--teal-mid);
+      border-radius: 4px;
+      padding: 3px 8px;
+      flex-shrink: 0;
+    }
+
+    .section-header h2 {
+      font-family: 'DM Serif Display', serif;
+      font-size: 1.25rem;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+    }
+
+    .section-body {
+      padding: 1.8rem 2rem;
+    }
+
+    .section-body p { color: var(--ink-muted); font-size: 0.94rem; line-height: 1.85; }
+    .section-body p + p { margin-top: 1rem; }
+
+    /* data list */
+    .data-list {
+      list-style: none;
+      margin-top: 1rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+    }
+
+    .data-list li {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 0.85rem;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .data-list li .bullet {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--teal);
+      flex-shrink: 0;
+    }
+
+    /* table */
+    .rights-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 0.88rem;
+    }
+
+    .rights-table th {
+      text-align: left;
+      padding: 10px 14px;
+      background: var(--teal);
+      color: #fff;
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .rights-table th:first-child { border-radius: 6px 0 0 0; }
+    .rights-table th:last-child { border-radius: 0 6px 0 0; }
+
+    .rights-table td {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      color: var(--ink-muted);
+    }
+
+    .rights-table tr:last-child td { border-bottom: none; }
+    .rights-table tr:nth-child(even) td { background: var(--bg); }
+
+    .rights-table td strong { color: var(--ink); font-weight: 600; }
+
+    /* warning box */
+    .warn-box {
+      background: #fff8f6;
+      border-left: 4px solid var(--red);
+      border-radius: 0 8px 8px 0;
+      padding: 1rem 1.4rem;
+      margin-top: 1.2rem;
+      font-size: 0.88rem;
+      color: var(--red);
+      font-weight: 500;
+    }
+
+    /* highlight box */
+    .highlight-box {
+      background: var(--teal-light);
+      border: 1px solid var(--teal-mid);
+      border-radius: 8px;
+      padding: 1rem 1.4rem;
+      margin-top: 1.2rem;
+      font-size: 0.88rem;
+      color: var(--teal);
+      font-weight: 500;
+    }
+
+    /* contact card */
+    .contact-card {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 1.2rem;
+    }
+
+    .contact-item {
+      flex: 1;
+      min-width: 180px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 18px;
+    }
+
+    .contact-item .c-label {
+      font-size: 0.68rem;
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin-bottom: 4px;
+    }
+
+    .contact-item .c-val {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .contact-item .c-val a { color: var(--teal); text-decoration: none; }
+    .contact-item .c-val a:hover { text-decoration: underline; }
+
+    /* ─── FOOTER ─────────────────────────────────────── */
+    footer {
+      background: var(--ink);
+      color: rgba(255,255,255,0.5);
+      text-align: center;
+      padding: 2rem;
+      font-size: 0.82rem;
+      margin-top: 4rem;
+      border-top: 3px solid var(--teal);
+    }
+
+    footer a { color: var(--teal); text-decoration: none; }
+    footer strong { color: rgba(255,255,255,0.8); }
+
+    /* ─── SCROLL ANIMATION ───────────────────────────── */
+    .section {
+      opacity: 0;
+      transform: translateY(24px);
+      animation: rise 0.55s ease forwards;
+    }
+
+    .section:nth-child(1) { animation-delay: 0.05s; }
+    .section:nth-child(2) { animation-delay: 0.1s; }
+    .section:nth-child(3) { animation-delay: 0.15s; }
+    .section:nth-child(4) { animation-delay: 0.2s; }
+    .section:nth-child(5) { animation-delay: 0.25s; }
+    .section:nth-child(6) { animation-delay: 0.3s; }
+    .section:nth-child(7) { animation-delay: 0.35s; }
+    .section:nth-child(8) { animation-delay: 0.4s; }
+    .section:nth-child(9) { animation-delay: 0.45s; }
+    .section:nth-child(10) { animation-delay: 0.5s; }
+
+    @keyframes rise {
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .intro-card {
+      opacity: 0;
+      animation: rise 0.5s ease 0.02s forwards;
+    }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <a href="index.html" class="logo">
+    <div class="logo-icon">🧪</div>
+    <span class="logo-text">MedLab<span>Solve</span></span>
+  </a>
+  <a href="index.html" class="back-link">← Back to App</a>
+</header>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-eyebrow">Legal &amp; Compliance</div>
+  <h1>Your <em>Privacy,</em><br>Our Responsibility.</h1>
+  <div class="hero-meta">
+    <div class="meta-chip"><strong>Effective:</strong> April 5, 2026</div>
+    <div class="meta-chip"><strong>Last Updated:</strong> April 5, 2026</div>
+    <div class="meta-chip"><strong>Jurisdiction:</strong> Federal Republic of Nigeria</div>
+    <div class="meta-chip"><strong>Framework:</strong> NDPR 2019</div>
+  </div>
+</div>
+
+<!-- MAIN CONTENT -->
+<div class="page-wrap">
+
+  <!-- TABLE OF CONTENTS -->
+  <aside class="toc">
+    <div class="toc-label">Contents</div>
+    <ol>
+      <li><a href="#s1">Who We Are</a></li>
+      <li><a href="#s2">Data We Collect</a></li>
+      <li><a href="#s3">How We Use It</a></li>
+      <li><a href="#s4">Data Sharing</a></li>
+      <li><a href="#s5">Data Storage &amp; Security</a></li>
+      <li><a href="#s6">Cookies &amp; Tracking</a></li>
+      <li><a href="#s7">Your Rights</a></li>
+      <li><a href="#s8">Data Retention</a></li>
+      <li><a href="#s9">Children</a></li>
+      <li><a href="#s10">Contact Us</a></li>
+    </ol>
+    <div class="toc-ndpr">
+      <p>⚖️ This policy is aligned with Nigeria's <strong>NDPR 2019</strong> and the Nigeria Data Protection Act <strong>2023</strong>.</p>
+    </div>
+  </aside>
+
+  <!-- POLICY CONTENT -->
+  <main class="content">
+
+    <!-- Intro -->
+    <div class="intro-card">
+      <p>
+        Welcome to <strong>MedLabSolve</strong> — an MCQ practice platform built for medical laboratory science students and professionals under the <strong>NIMELSSA-LCU</strong> association. This Privacy Policy explains clearly and honestly what data we collect, how we use it, and the rights you have over it. We believe in transparency — no jargon, no fine print traps.
+      </p>
+    </div>
+
+    <!-- 1. Who We Are -->
+    <div class="section" id="s1">
+      <div class="section-header">
+        <span class="section-number">01</span>
+        <h2>Who We Are</h2>
+      </div>
+      <div class="section-body">
+        <p><strong>MedLabSolve</strong> is operated by <strong>NIMELSSA-LCU</strong> (Nigerian Medical Laboratory Science Students Association — Lead City University Chapter). We are the data controller responsible for the personal information collected through this platform.</p>
+        <p>Our platform is hosted on <strong>GitHub Pages</strong> and uses third-party backend services (including Google Firebase) to power authentication, data storage, and real-time features.</p>
+      </div>
+    </div>
+
+    <!-- 2. Data We Collect -->
+    <div class="section" id="s2">
+      <div class="section-header">
+        <span class="section-number">02</span>
+        <h2>Data We Collect</h2>
+      </div>
+      <div class="section-body">
+        <p>We only collect data that is necessary to provide and improve the MedLabSolve experience. This includes:</p>
+        <ul class="data-list">
+          <li><span class="bullet"></span>Display name / username</li>
+          <li><span class="bullet"></span>Email address</li>
+          <li><span class="bullet"></span>Password (encrypted)</li>
+          <li><span class="bullet"></span>Chosen avatar / profile photo</li>
+          <li><span class="bullet"></span>Quiz scores &amp; attempts</li>
+          <li><span class="bullet"></span>Daily streak data</li>
+          <li><span class="bullet"></span>Difficulty &amp; mode preferences</li>
+          <li><span class="bullet"></span>Invite code &amp; referral links</li>
+          <li><span class="bullet"></span>Leaderboard ranking</li>
+          <li><span class="bullet"></span>Device &amp; browser type</li>
+          <li><span class="bullet"></span>IP address (approximate)</li>
+          <li><span class="bullet"></span>Time &amp; frequency of app usage</li>
+        </ul>
+        <div class="highlight-box">
+          ✅ We do <strong>not</strong> collect payment information, phone numbers, physical addresses, or any government-issued ID numbers.
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. How We Use It -->
+    <div class="section" id="s3">
+      <div class="section-header">
+        <span class="section-number">03</span>
+        <h2>How We Use Your Data</h2>
+      </div>
+      <div class="section-body">
+        <p>Your data is used strictly for the following purposes:</p>
+        <ul class="data-list">
+          <li><span class="bullet"></span>Account creation &amp; login</li>
+          <li><span class="bullet"></span>Tracking quiz performance</li>
+          <li><span class="bullet"></span>Displaying leaderboard rankings</li>
+          <li><span class="bullet"></span>Maintaining daily streaks</li>
+          <li><span class="bullet"></span>Sending in-app notifications</li>
+          <li><span class="bullet"></span>Enabling challenge &amp; invite features</li>
+          <li><span class="bullet"></span>Improving quiz content quality</li>
+          <li><span class="bullet"></span>Admin moderation &amp; support</li>
+        </ul>
+        <div class="warn-box">
+          🚫 We will <strong>never</strong> use your data for advertising, profiling, or sell it to any third party.
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Data Sharing -->
+    <div class="section" id="s4">
+      <div class="section-header">
+        <span class="section-number">04</span>
+        <h2>Data Sharing &amp; Third Parties</h2>
+      </div>
+      <div class="section-body">
+        <p>We use trusted third-party services to power MedLabSolve. These services may process certain data on our behalf:</p>
+        <table class="rights-table">
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th>Purpose</th>
+              <th>Data Shared</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Google Firebase</strong></td>
+              <td>Authentication, database, storage</td>
+              <td>Email, name, scores, avatar</td>
+            </tr>
+            <tr>
+              <td><strong>GitHub Pages</strong></td>
+              <td>Website hosting</td>
+              <td>IP address (access logs)</td>
+            </tr>
+            <tr>
+              <td><strong>Google Fonts</strong></td>
+              <td>Typography rendering</td>
+              <td>IP address (CDN request)</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="margin-top:1rem;">We do not share your personal data with any other external parties, government bodies, or commercial entities unless required by Nigerian law.</p>
+      </div>
+    </div>
+
+    <!-- 5. Storage & Security -->
+    <div class="section" id="s5">
+      <div class="section-header">
+        <span class="section-number">05</span>
+        <h2>Data Storage &amp; Security</h2>
+      </div>
+      <div class="section-body">
+        <p>Your data is stored securely on <strong>Google Firebase</strong> servers. We implement the following safeguards:</p>
+        <ul class="data-list">
+          <li><span class="bullet"></span>HTTPS encryption in transit</li>
+          <li><span class="bullet"></span>Firebase Auth for password hashing</li>
+          <li><span class="bullet"></span>Firestore security rules</li>
+          <li><span class="bullet"></span>Role-based admin access controls</li>
+          <li><span class="bullet"></span>Regular security reviews</li>
+        </ul>
+        <div class="warn-box">
+          ⚠️ No system is 100% secure. While we take reasonable precautions, we cannot guarantee absolute security of data transmitted over the internet.
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Cookies -->
+    <div class="section" id="s6">
+      <div class="section-header">
+        <span class="section-number">06</span>
+        <h2>Cookies &amp; Local Storage</h2>
+      </div>
+      <div class="section-body">
+        <p>MedLabSolve uses browser <strong>localStorage</strong> and session cookies to maintain your login state, save preferences (such as avatar choice, quiz mode, and "Remember Me" setting), and preserve your streak data between sessions.</p>
+        <p>We do <strong>not</strong> use advertising cookies, third-party trackers, or analytics pixels. Firebase may set its own functional cookies as part of its authentication service.</p>
+        <div class="highlight-box">
+          ✅ You can clear cookies and localStorage at any time through your browser settings. This will log you out of the app.
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. Your Rights -->
+    <div class="section" id="s7">
+      <div class="section-header">
+        <span class="section-number">07</span>
+        <h2>Your Rights (NDPR &amp; NDPA 2023)</h2>
+      </div>
+      <div class="section-body">
+        <p>Under Nigeria's data protection laws, you have the following rights regarding your personal data:</p>
+        <table class="rights-table">
+          <thead>
+            <tr>
+              <th>Right</th>
+              <th>What It Means</th>
+              <th>How to Exercise</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Access</strong></td>
+              <td>Request a copy of your data</td>
+              <td>Contact us via email</td>
+            </tr>
+            <tr>
+              <td><strong>Correction</strong></td>
+              <td>Fix inaccurate information</td>
+              <td>Settings page or email</td>
+            </tr>
+            <tr>
+              <td><strong>Deletion</strong></td>
+              <td>Request account &amp; data removal</td>
+              <td>"Wipe My Progress" or email</td>
+            </tr>
+            <tr>
+              <td><strong>Restriction</strong></td>
+              <td>Limit how your data is used</td>
+              <td>Contact us via email</td>
+            </tr>
+            <tr>
+              <td><strong>Portability</strong></td>
+              <td>Receive your data in a usable format</td>
+              <td>Contact us via email</td>
+            </tr>
+            <tr>
+              <td><strong>Objection</strong></td>
+              <td>Object to certain uses of your data</td>
+              <td>Contact us via email</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="margin-top:1rem;">We will respond to all verified requests within <strong>30 days</strong> in accordance with the NDPA 2023.</p>
+      </div>
+    </div>
+
+    <!-- 8. Data Retention -->
+    <div class="section" id="s8">
+      <div class="section-header">
+        <span class="section-number">08</span>
+        <h2>Data Retention</h2>
+      </div>
+      <div class="section-body">
+        <p>We retain your personal data for as long as your account is active. If you delete your account or use the <strong>"Wipe My Progress"</strong> feature, your data will be permanently removed from our database within <strong>14 days</strong>.</p>
+        <p>Anonymized, aggregated quiz performance data (with no personally identifiable information) may be retained indefinitely to help improve question quality and platform performance.</p>
+      </div>
+    </div>
+
+    <!-- 9. Children -->
+    <div class="section" id="s9">
+      <div class="section-header">
+        <span class="section-number">09</span>
+        <h2>Children &amp; Minors</h2>
+      </div>
+      <div class="section-body">
+        <p>MedLabSolve is designed for medical laboratory science students, most of whom are university-level adults. We do not knowingly collect data from children under the age of <strong>13</strong>.</p>
+        <p>If you believe a minor has created an account without parental consent, please contact us immediately and we will delete the account promptly.</p>
+      </div>
+    </div>
+
+    <!-- 10. Contact -->
+    <div class="section" id="s10">
+      <div class="section-header">
+        <span class="section-number">10</span>
+        <h2>Contact &amp; Data Requests</h2>
+      </div>
+      <div class="section-body">
+        <p>For any questions, concerns, or data requests related to this Privacy Policy, please reach out to us through any of the channels below:</p>
+        <div class="contact-card">
+          <div class="contact-item">
+            <div class="c-label">Organization</div>
+            <div class="c-val">NIMELSSA-LCU</div>
+          </div>
+          <div class="contact-item">
+            <div class="c-label">Platform</div>
+            <div class="c-val">MedLabSolve</div>
+          </div>
+          <div class="contact-item">
+            <div class="c-label">GitHub</div>
+            <div class="c-val"><a href="https://github.com/ovieofdelta" target="_blank">@ovieofdelta</a></div>
+          </div>
+          <div class="contact-item">
+            <div class="c-label">App URL</div>
+            <div class="c-val"><a href="https://ovieofdelta.github.io/MedLabSolve/" target="_blank">MedLabSolve</a></div>
+          </div>
+        </div>
+        <div class="highlight-box" style="margin-top:1.5rem;">
+          📋 This Privacy Policy may be updated periodically. We will notify registered users of any material changes via an in-app notification. Continued use of MedLabSolve after changes constitutes acceptance of the updated policy.
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <p>
+    © 2026 <strong>NIMELSSA-LCU · MedLabSolve</strong> &nbsp;|&nbsp;
+    <a href="index.html">Back to App</a> &nbsp;|&nbsp;
+    <strong>Privacy Policy</strong>
+  </p>
+  <p style="margin-top:6px; font-size:0.75rem;">
+    Aligned with Nigeria Data Protection Regulation (NDPR) 2019 &amp; Nigeria Data Protection Act (NDPA) 2023.
+  </p>
+</footer>
+
+</body>
+</html>
