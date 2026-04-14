@@ -1,7 +1,8 @@
 import { initializeApp }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword,
-         signInWithEmailAndPassword, signOut, onAuthStateChanged }
+         signInWithEmailAndPassword, signOut, onAuthStateChanged,
+         setPersistence, browserLocalPersistence, browserSessionPersistence }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
@@ -617,13 +618,13 @@ function logout() {
         idx = Math.min(idx + 1, msgs.length - 1);
         textEl.innerText = msgs[idx];
     }, 400);
-    setTimeout(function() {
+    setTimeout(async function() {
         clearInterval(iv);
         textEl.innerText = 'Logged out ✅';
-        setTimeout(function() {
+        setTimeout(async function() {
             window.userDoc = null;
             customImg      = null;
-            signOut(fbAuth);
+            try { await signOut(fbAuth); } catch(e) { /* ignore */ }
             hideAll();
             document.getElementById('auth-s').classList.remove('hidden');
             setAuthMode('login');
@@ -809,11 +810,17 @@ async function fbLogin() {
     // FIX: check rate limit first
     if (!loginAllowed()) return;
 
-    const username = document.getElementById('u-in').value.trim();
-    const password = document.getElementById('p-in').value.trim();
+    const username   = document.getElementById('u-in').value.trim();
+    const password   = document.getElementById('p-in').value.trim();
+    const rememberMe = document.getElementById('remember-me')?.checked ?? false;
 
     if (!username) { showToast('Please enter a username.', 'error'); return; }
     if (!password) { showToast('Please enter a password.', 'error'); return; }
+
+    // FIX: Set persistence BEFORE signing in so Remember Me is honoured.
+    // browserLocalPersistence = survives tab/browser close (true remember me).
+    // browserSessionPersistence = cleared when the tab is closed.
+    await setPersistence(fbAuth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
 
     const fakeEmail = username.toLowerCase() + '@medlabquiz.local';
     try {
@@ -1478,6 +1485,13 @@ onAuthStateChanged(fbAuth, async function(fbUser) {
                 return;
             }
             showLoginLoader(function() { fbShowMain(); });
+        } else {
+            // FIX: loadUserDoc returned null — sign out and show a clear error
+            // instead of leaving the user silently stuck on a blank screen.
+            await signOut(fbAuth);
+            hideAll();
+            document.getElementById('auth-s').classList.remove('hidden');
+            showToast('Could not load your account. Please try again.', 'error', 4000);
         }
     }
 });
