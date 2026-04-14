@@ -1095,3 +1095,34 @@ label.field-label {
 .user-role     { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
 .active-role   { background: #d4edda; color: #155724; }
 .disabled-role { background: #f8d7da; color: #721c24; }
+
+/* ── Logo on login screen ─────────────────────────── */
+.logo-wrap {
+    text-align: center;
+    margin-bottom: 8px;
+}
+
+.site-logo {
+    width: 210px;
+    max-width: 82%;
+    height: auto;
+    display: inline-block;
+    border-radius: 12px;
+    object-fit: contain;
+}
+
+/* ── Small logo on dashboard ─────────────────────── */
+.dashboard-logo-wrap {
+    text-align: center;
+    margin-bottom: 10px;
+}
+
+.dashboard-logo {
+    width: 110px;
+    max-width: 55%;
+    height: auto;
+    display: inline-block;
+    border-radius: 8px;
+    object-fit: contain;
+    opacity: 0.92;
+}
