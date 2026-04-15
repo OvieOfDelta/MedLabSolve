@@ -39,7 +39,7 @@ const appCheck = initializeAppCheck(fbApp, {
 /* ================================================================
    CONSTANTS
    ================================================================ */
-const QUIZ_URL = 'https://ovieofdelta.github.io/MedLabSolve/';
+const QUIZ_URL = 'https://medlabsolve.com';
 
 const BADGE_DATA = {
     "Chemical Pathologist":  "🧪",
