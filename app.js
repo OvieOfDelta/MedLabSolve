@@ -2,9 +2,11 @@ import { initializeApp }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword,
          signInWithEmailAndPassword, signOut, onAuthStateChanged,
-         setPersistence, browserLocalPersistence, browserSessionPersistence }
+         setPersistence, browserLocalPersistence, browserSessionPersistence,
+         reauthenticateWithCredential, EmailAuthProvider }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs }
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs,
+         runTransaction, writeBatch, deleteDoc }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 import { initializeAppCheck, ReCaptchaV3Provider }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app-check.js";
@@ -92,7 +94,13 @@ function esc(val) {
    the value as data, never as markup.
    ================================================================ */
 function makeAvatarEl(avatar, sizePx) {
-    if (avatar && avatar.length > 10) {
+    // FIX #7: only accept data-URI images or single emoji/short strings.
+    // Rejects http/https tracking pixels and javascript: URIs.
+    const isDataImage  = typeof avatar === 'string' && avatar.startsWith('data:image/');
+    const isShortEmoji = typeof avatar === 'string' && avatar.length <= 10;
+    const useImage     = isDataImage;
+
+    if (useImage) {
         const img = document.createElement('img');
         img.className = 'avatar-img';
         if (sizePx) {
@@ -105,35 +113,47 @@ function makeAvatarEl(avatar, sizePx) {
         return img;
     }
     const span = document.createElement('span');
-    span.textContent = avatar || '👤';     // textContent never parses HTML
+    // Fall back to emoji avatar or default — textContent never parses HTML
+    span.textContent = (isShortEmoji && avatar) ? avatar : '👤';
     if (sizePx) span.style.fontSize = Math.round(sizePx * 0.65) + 'px';
     return span;
 }
 
 /* ================================================================
-   SECURITY — LOGIN RATE LIMITER (client-side)
-   FIX: Limits consecutive failed login attempts before adding a
-   cooldown, reducing the effectiveness of credential stuffing.
-   Firebase Auth also throttles server-side; this adds a layer.
+   SECURITY — LOGIN RATE LIMITER (client-side, sessionStorage-backed)
+   FIX #3: Storing state in sessionStorage instead of a plain object
+   means a page reload no longer resets the lockout — the attacker
+   must close the entire tab (ending the session) to escape it.
+   Firebase Auth also throttles server-side; this adds an earlier gate.
    ================================================================ */
-const _loginAttempts = { count: 0, lockedUntil: 0 };
+function _loginState() {
+    try {
+        return JSON.parse(sessionStorage.getItem('_mls_login') || '{}');
+    } catch { return {}; }
+}
+function _saveLoginState(state) {
+    try { sessionStorage.setItem('_mls_login', JSON.stringify(state)); } catch { /* ignore */ }
+}
 function loginAllowed() {
-    const now = Date.now();
-    if (now < _loginAttempts.lockedUntil) {
-        const secs = Math.ceil((_loginAttempts.lockedUntil - now) / 1000);
+    const now   = Date.now();
+    const state = _loginState();
+    if (now < (state.lockedUntil || 0)) {
+        const secs = Math.ceil((state.lockedUntil - now) / 1000);
         showToast('Too many attempts. Wait ' + secs + 's before trying again.', 'error', 4000);
         return false;
     }
     return true;
 }
 function loginFailed() {
-    _loginAttempts.count++;
-    if (_loginAttempts.count >= 5) {
-        _loginAttempts.lockedUntil = Date.now() + 30000; // 30-second lockout
-        _loginAttempts.count = 0;
+    const state = _loginState();
+    state.count = (state.count || 0) + 1;
+    if (state.count >= 5) {
+        state.lockedUntil = Date.now() + 30000;
+        state.count = 0;
     }
+    _saveLoginState(state);
 }
-function loginSucceeded() { _loginAttempts.count = 0; _loginAttempts.lockedUntil = 0; }
+function loginSucceeded() { _saveLoginState({}); }
 
 /* ================================================================
    STATE
@@ -409,8 +429,15 @@ function showSubSubMenu(cat, sub) {
    ================================================================ */
 function startQuiz(cat, sub, ssc) {
     currentCat = cat; currentSub = sub; currentSsc = ssc;
-    currentQ   = quizData.filter(function(q) { return q.c === cat && q.sc === sub && q.ssc === ssc; })
-                         .sort(function() { return Math.random() - 0.5; });
+    // FIX #14: Fisher-Yates produces a truly uniform shuffle.
+    // Array.sort(Math.random-0.5) is statistically biased — earlier
+    // elements are more likely to stay near their original position.
+    const pool = quizData.filter(function(q) { return q.c === cat && q.sc === sub && q.ssc === ssc; });
+    for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    currentQ = pool;
     if (currentQ.length === 0) { alert('No questions found for this topic.'); return; }
     qIdx = 0; score = 0; mistakes = [];
     hideAll();
@@ -621,6 +648,10 @@ function logout() {
     setTimeout(async function() {
         clearInterval(iv);
         textEl.innerText = 'Logged out ✅';
+        // FIX #8: both inner callbacks are now async so signOut can be
+        // properly awaited. Previously it was fire-and-forget inside a
+        // plain setTimeout, meaning the auth state wasn't cleared before
+        // the login screen appeared — causing "can't log in after logout".
         setTimeout(async function() {
             window.userDoc = null;
             customImg      = null;
@@ -666,9 +697,25 @@ async function loadUserDoc(uid) {
 async function saveUserDoc() {
     if (!window.userDoc || !window.userDoc._uid) return;
     const uid  = window.userDoc._uid;
-    const data = Object.assign({}, window.userDoc);
-    delete data._uid;
-    await setDoc(doc(fbDb, 'users', uid), data);
+    const src  = window.userDoc;
+
+    // FIX #1 & #6: Only write the explicitly allowed fields.
+    // Stripping `role` and `disabled` here means a user who does
+    //   window.userDoc.role = 'admin'; updateSettings();
+    // will NOT be able to persist that change via this path.
+    // Firestore security rules are the server-side enforcement;
+    // this is an additional client-side defence-in-depth layer.
+    const ALLOWED_KEYS = [
+        'username', 'hint', 'avatar', 'high', 'streak', 'lastLogin',
+        'mastery', 'badges', 'inviteCode', 'invitedBy', 'inviteCount',
+        'notifications'
+        // 'role' and 'disabled' are intentionally omitted — admin-only writes
+    ];
+    const data = {};
+    ALLOWED_KEYS.forEach(function(k) {
+        if (k in src) data[k] = src[k];
+    });
+    await setDoc(doc(fbDb, 'users', uid), data, { merge: true });
 }
 
 /* ================================================================
@@ -739,64 +786,86 @@ async function fbRegister() {
     try {
         showToast('Creating account…', 'info', 5000);
 
-        // FIX: Check username availability before creating the Auth account.
-        // The usernames/{username} collection enforces uniqueness server-side,
-        // but checking here first gives a better error message than a Firestore
-        // permission-denied error.
-        const usernameSnap = await getDoc(doc(fbDb, 'usernames', username));
-        if (usernameSnap.exists()) {
-            showToast('Username already taken. Please choose another.', 'error', 4000);
+        // FIX #4 & #9: Use a Firestore transaction to atomically check
+        // username availability AND reserve it in one operation.
+        // Previously: check → [window] → write was a TOCTOU race —
+        // two simultaneous registrations would both pass the check.
+        // Now the transaction fails if another write landed first.
+        // If any subsequent Firestore write fails, we delete the
+        // newly-created Auth account so it doesn't become an orphan.
+        let cred;
+        try {
+            cred = await createUserWithEmailAndPassword(fbAuth, fakeEmail, password);
+        } catch (authErr) {
+            if (authErr.code === 'auth/email-already-in-use') {
+                showToast('Username already taken.', 'error');
+            } else if (authErr.code === 'auth/weak-password') {
+                showToast('Password must be at least ' + LIMITS.PASSWORD_MIN + ' characters.', 'error');
+            } else {
+                showToast('Registration failed. Please try again.', 'error');
+            }
             return;
         }
 
-        const cred       = await createUserWithEmailAndPassword(fbAuth, fakeEmail, password);
         const uid        = cred.user.uid;
         const inviteCode = generateInviteCode(username);
 
-        // Write the private user document
-        await setDoc(doc(fbDb, 'users', uid), {
-            username,
-            hint,
-            avatar:        finalAvatar || '👤',
-            high:          0,
-            streak:        0,
-            lastLogin:     null,
-            mastery:       {},
-            badges:        [],
-            inviteCode,
-            invitedBy:     invitedBy || null,
-            inviteCount:   0,
-            notifications: [],
-            role:          'user',
-            disabled:      false
-        });
+        try {
+            // Atomic transaction: reserve username or throw if taken
+            await runTransaction(fbDb, async function(tx) {
+                const usernameRef  = doc(fbDb, 'usernames', username);
+                const usernameSnap = await tx.get(usernameRef);
+                if (usernameSnap.exists()) {
+                    throw new Error('USERNAME_TAKEN');
+                }
+                // Reserve the username
+                tx.set(usernameRef, { uid, hint });
+            });
 
-        // FIX: Write the usernames lookup doc (enforces global uniqueness
-        // server-side and allows forgot-password hint lookups without
-        // exposing the full user document).
-        await setDoc(doc(fbDb, 'usernames', username), { uid, hint });
+            // Username reserved — now write the rest in a batch
+            const batch = writeBatch(fbDb);
+            batch.set(doc(fbDb, 'users', uid), {
+                username,
+                hint,
+                avatar:        finalAvatar || '👤',
+                high:          0,
+                streak:        0,
+                lastLogin:     null,
+                mastery:       {},
+                badges:        [],
+                inviteCode,
+                invitedBy:     invitedBy || null,
+                inviteCount:   0,
+                notifications: [],
+                role:          'user',
+                disabled:      false
+            });
+            batch.set(doc(fbDb, 'leaderboard', uid), {
+                username,
+                avatar: finalAvatar || '👤',
+                high:   0,
+                streak: 0,
+                badges: []
+            });
+            await batch.commit();
 
-        // FIX: Write the leaderboard entry so this user appears
-        // on the leaderboard immediately after registering.
-        await setDoc(doc(fbDb, 'leaderboard', uid), {
-            username,
-            avatar: finalAvatar || '👤',
-            high:   0,
-            streak: 0,
-            badges: []
-        });
+        } catch (fsErr) {
+            // FIX #9: clean up the Auth account so it doesn't become an orphan
+            try { await cred.user.delete(); } catch(e) { /* ignore */ }
+            if (fsErr.message === 'USERNAME_TAKEN') {
+                showToast('Username already taken. Please choose another.', 'error', 4000);
+            } else {
+                showToast('Registration failed. Please try again.', 'error');
+            }
+            return;
+        }
 
         customImg = null;
         showToast('Account created! Please log in. ✅', 'success', 3500);
         setTimeout(function() { setAuthMode('login'); }, 400);
     } catch (err) {
-        if (err.code === 'auth/email-already-in-use') {
-            showToast('Username already taken.', 'error');
-        } else if (err.code === 'auth/weak-password') {
-            showToast('Password must be at least ' + LIMITS.PASSWORD_MIN + ' characters.', 'error');
-        } else {
-            showToast('Registration failed. Please try again.', 'error');
-        }
+        // Outer catch for unexpected errors (network, etc.)
+        showToast('Registration failed. Please try again.', 'error');
     }
 }
 
@@ -1141,7 +1210,12 @@ function fbShowTrophies() {
 
 /* ================================================================
    SETTINGS
-   FIX: avatar size re-validated on save.
+   FIX #7:  Avatar format validated — only data:image/* accepted.
+   FIX #11: Password change now prompts for current password and
+            calls reauthenticateWithCredential first. Firebase
+            requires re-auth for sensitive operations when the
+            session is older than a few minutes; without it the
+            update throws auth/requires-recent-login silently.
    ================================================================ */
 async function fbUpdateSettings() {
     const d  = window.userDoc;
@@ -1149,6 +1223,16 @@ async function fbUpdateSettings() {
     const av = document.getElementById('set-avatar').value;
 
     const newAvatar = customImg ? customImg : av;
+
+    // FIX #7: reject non-image data URIs and remote URLs
+    if (newAvatar && newAvatar.length > 10) {
+        if (!newAvatar.startsWith('data:image/') && newAvatar.length > 10) {
+            // Allow short emoji values (length ≤ 10) but reject everything else
+            // that isn't a proper image data URI
+            showToast('Invalid avatar format. Please re-upload your photo.', 'error');
+            return;
+        }
+    }
 
     // FIX: size guard before writing
     if (newAvatar && newAvatar.length > LIMITS.AVATAR_MAX) {
@@ -1158,7 +1242,7 @@ async function fbUpdateSettings() {
 
     d.avatar = newAvatar;
     await saveUserDoc();
-    await savePublicProfile();   // FIX: push avatar change to leaderboard profile
+    await savePublicProfile();   // push avatar change to leaderboard profile
 
     if (np) {
         if (np.length < LIMITS.PASSWORD_MIN) {
@@ -1166,10 +1250,24 @@ async function fbUpdateSettings() {
             return;
         }
         if (fbAuth.currentUser) {
+            // FIX #11: re-authenticate before the sensitive password update
+            const currentPw = window.prompt('Enter your CURRENT password to confirm the change:');
+            if (!currentPw) {
+                showToast('Password change cancelled.', 'info');
+                return;
+            }
             try {
+                const credential = EmailAuthProvider.credential(
+                    fbAuth.currentUser.email, currentPw
+                );
+                await reauthenticateWithCredential(fbAuth.currentUser, credential);
                 await fbAuth.currentUser.updatePassword(np);
             } catch (e) {
-                showToast('Profile saved but password update failed.\nPlease log out and back in first.', 'error', 4000);
+                if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') {
+                    showToast('Current password is incorrect. Password not changed.', 'error', 4000);
+                } else {
+                    showToast('Password update failed. Please log out and back in, then try again.', 'error', 4000);
+                }
                 return;
             }
         }
@@ -1351,7 +1449,9 @@ async function fbSendChallenge() {
 
     const topic = currentSsc || currentSub || currentCat;
     try {
-        await setDoc(doc(fbDb, 'challenges', myName + '_' + target + '_' + Date.now()), {
+        // FIX #12: use a random UUID instead of the predictable
+        // myName_target_timestamp pattern which was guessable/enumerable.
+        await setDoc(doc(fbDb, 'challenges', crypto.randomUUID()), {
             from:      myName,
             fromUid:   fbAuth.currentUser ? fbAuth.currentUser.uid : '',  // FIX: store UID for direct notification writes
             to:        target,
@@ -1386,6 +1486,16 @@ async function fbCheckChallengeResult(finalScore) {
         const snap = await getDoc(doc(fbDb, 'challenges', chalId));
         if (!snap.exists()) return;
         const ch = snap.data();
+
+        // FIX #5: Verify the current user is actually the challenge recipient.
+        // Without this check, someone who sets window._activeChallengeId from
+        // the console could write their score onto a challenge meant for someone else.
+        // Firestore rules are the server-side enforcement, but this adds an
+        // early client-side gate with a clear error.
+        if (ch.to !== myName) {
+            window._activeChallengeId = null;
+            return; // silently ignore — this challenge isn't addressed to us
+        }
 
         // FIX: validate finalScore before writing it anywhere
         const safeScore = (typeof finalScore === 'number' && Number.isInteger(finalScore) && finalScore >= 0)
@@ -1486,8 +1596,9 @@ onAuthStateChanged(fbAuth, async function(fbUser) {
             }
             showLoginLoader(function() { fbShowMain(); });
         } else {
-            // FIX: loadUserDoc returned null — sign out and show a clear error
-            // instead of leaving the user silently stuck on a blank screen.
+            // FIX: loadUserDoc returned null — Firestore doc missing or read failed.
+            // Sign out cleanly and show an actionable error instead of leaving
+            // the user silently stuck on a blank screen.
             await signOut(fbAuth);
             hideAll();
             document.getElementById('auth-s').classList.remove('hidden');
@@ -1529,17 +1640,21 @@ document.addEventListener('contextmenu', function(e) {
 
 /* ================================================================
    ADMIN PANEL
-   FIX: isAdmin() is still client-side (unavoidable in a pure
-   front-end app) but every admin action is ALSO enforced by the
-   Firestore security rules server-side, so even if a user calls
-   these functions from the console, Firebase will reject the
-   write unless their role === 'admin' in Firestore.
+   FIX #13: Removed ADMIN_USERNAMES hardcoded array. Anyone reading
+   the source code previously learned the admin's username — an
+   unnecessary information disclosure. Admin status is now determined
+   solely by the role field in the Firestore user document, which is
+   only writable by existing admins (enforced server-side by rules).
+   FIX: isAdmin() guard added to every admin function.
+   Without this, any logged-in user who found the function name
+   could call e.g. adminPromote(someUID, 'victim') from the
+   console. Firestore rules are the final enforcement, but this
+   adds an earlier gate and a clear error message.
    ================================================================ */
-const ADMIN_USERNAMES = ['Jesse'];
-
 function isAdmin() {
+    // FIX #13: role check only — no hardcoded username list
     const d = window.userDoc || {};
-    return d.role === 'admin' || ADMIN_USERNAMES.includes(d.username);
+    return d.role === 'admin';
 }
 
 function showAdmin() {
@@ -1811,8 +1926,21 @@ async function adminDeleteUser(uid, username) {
     if (!confirm('Permanently DELETE ' + username + '? This removes all their data and cannot be undone.')) return;
     if (!confirm('Are you absolutely sure? This is irreversible.')) return;
     try {
-        await setDoc(doc(fbDb, 'users', uid), { _deleted: true, username: '[Deleted]' });
-        showToast(username + ' has been deleted.', 'info', 3000);
+        // FIX #2: Delete from ALL three Firestore collections, not just users.
+        // Previously only users/{uid} was tombstoned, leaving ghost entries in
+        // leaderboard and usernames, and the username permanently squatted.
+        const batch = writeBatch(fbDb);
+        batch.delete(doc(fbDb, 'users',       uid));
+        batch.delete(doc(fbDb, 'leaderboard', uid));
+        batch.delete(doc(fbDb, 'usernames',   username));
+        await batch.commit();
+
+        // NOTE: The Firebase Auth account itself cannot be deleted from the
+        // client SDK without the user being signed in as that account.
+        // Full deletion requires the Firebase Admin SDK in a Cloud Function.
+        // The user can no longer access data, but may still be able to log in
+        // and will hit loadUserDoc → null → forced sign-out.
+        showToast(username + ' has been deleted. ⚠️ Their Auth account requires manual removal via Firebase Console.', 'info', 6000);
         adminLoadPlayers();
     } catch (err) {
         showToast('Could not delete user.', 'error');
