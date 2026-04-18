@@ -3,20 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MedLabSolve — Your Smart Study Companion</title>
+    <title>MedLabSolve</title>
     <link rel="icon" href="photo.jpg">
-
-    <!-- Social / WhatsApp / Twitter preview -->
-    <meta property="og:title"        content="MedLabSolve">
-    <meta property="og:description"  content="Your Smart Study Companion for MLS MCQs — Curriculum-mapped, peer-reviewed questions. Free. No download needed.">
-    <meta property="og:image"        content="https://www.medlabsolve.com/photo.jpg">
-    <meta property="og:url"          content="https://www.medlabsolve.com">
-    <meta property="og:type"         content="website">
-    <meta name="twitter:card"        content="summary_large_image">
-    <meta name="twitter:title"       content="MedLabSolve">
-    <meta name="twitter:description" content="Your Smart Study Companion for MLS MCQs — Free, no download needed.">
-    <meta name="twitter:image"       content="https://www.medlabsolve.com/photo.jpg">
-
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -49,9 +37,7 @@
 
     <!-- AUTH SCREEN -->
     <div id="auth-s" class="section">
-        <div class="logo-wrap">
-            <img src="photo.jpg" alt="MedLabSolve Logo" class="site-logo">
-        </div>
+        <h1>MedLabSolve</h1>
         <p id="auth-msg" style="margin-bottom:16px;">Login to practice for MCQs</p>
 
         <input type="text"     id="u-in" placeholder="Username">
@@ -89,9 +75,6 @@
 
     <!-- DASHBOARD -->
     <div id="main-s" class="section hidden">
-        <div class="dashboard-logo-wrap">
-            <img src="photo.jpg" alt="MedLabSolve" class="dashboard-logo">
-        </div>
         <h2><span id="display-avatar"></span> Hi, <span id="display-user"></span>!</h2>
 
         <!-- Challenge notification banner -->
@@ -260,15 +243,14 @@
 
         <button class="btn secondary" onclick="backToMain()" style="margin-top:10px;">← Back to Dashboard</button>
     </div>
-    <footer style="display: flex; justify-content: space-between; align-items: center; padding: 20px; font-size: 12px; color: #888;">
-  <div style="flex: 1; text-align: left;">
-    © 2026 NIMELSSA-LCU • <a href="privacy.html" style="color: #4da3ff; text-decoration: none;">Privacy Policy</a>
-  </div>
-  <div style="flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
-    <span>System Architect:</span>
-    <span style="color: #fff; font-weight: 600;">Ishegbe Jesse</span>
-  </div>
-</footer>
+
+    <footer class="login-footer">
+      <span class="footer-copy">&copy; 2026 NIMELSSA-LCU</span>
+      <span class="footer-sep">·</span>
+      <a href="privacy.html" class="footer-link">Privacy Policy</a>
+      <span class="footer-sep">·</span>
+      <span class="footer-dev">Dev: Ishegbe Jesse</span>
+    </footer>
 </div>
 
 <script type="module" src="app.js"></script>
