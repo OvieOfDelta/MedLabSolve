@@ -576,13 +576,47 @@ label.field-label {
 
 .logout-bar-fill.draining { width: 0%; }
 
-/* FIX 5: Added missing closing brace to login-footer */
+/* FIX 5: Footer — clean centered single-line layout */
 .login-footer {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 8px;
   flex-wrap: nowrap;
-  font-size: 0.82rem;
+  font-size: 0.75rem;
+  padding: 14px 16px;
+  text-align: center;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+.footer-copy {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.footer-sep {
+  color: var(--muted);
+  opacity: 0.4;
+}
+
+.footer-link {
+  color: var(--primary);
+  text-decoration: none;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.footer-link:hover {
+  text-decoration: underline;
+}
+
+.footer-dev {
+  color: var(--muted);
+  white-space: nowrap;
+  opacity: 0.75;
+  font-style: italic;
 }
 /* ============================================================
    TOAST NOTIFICATION
