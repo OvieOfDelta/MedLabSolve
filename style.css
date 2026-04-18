@@ -576,19 +576,20 @@ label.field-label {
 
 .logout-bar-fill.draining { width: 0%; }
 
-/* FIX 5: Footer — clean centered single-line layout */
+/* FIX 5: Footer — responsive, wraps cleanly on small screens */
 .login-footer {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  flex-wrap: nowrap;
-  font-size: 0.75rem;
-  padding: 14px 16px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 0.72rem;
+  padding: 12px 12px;
   text-align: center;
   color: var(--muted);
   border-top: 1px solid var(--border);
   margin-top: 8px;
+  line-height: 1.8;
 }
 
 .footer-copy {
