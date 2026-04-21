@@ -6,7 +6,7 @@ import { getAuth, createUserWithEmailAndPassword,
          reauthenticateWithCredential, EmailAuthProvider }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs,
-         runTransaction, writeBatch, deleteDoc }
+         runTransaction, writeBatch, deleteDoc, query, where }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 import { initializeAppCheck, ReCaptchaV3Provider }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app-check.js";
@@ -28,13 +28,27 @@ const fbDb   = getFirestore(fbApp);
 
 /* ================================================================
    APP CHECK — Only registered domains can call Firebase APIs.
+   FIX: Wrapped in try/catch. If the domain is not registered in
+   Firebase Console → App Check, or if the reCAPTCHA script is
+   blocked by an ad blocker / strict mobile browser, initializeAppCheck
+   throws synchronously and previously crashed the entire module —
+   making login show "No internet connection" even with full signal.
+   Now the app continues working (Auth + Firestore still function)
+   while App Check silently degrades. You MUST register medlabsolve.com
+   in Firebase Console → App Check → Web Apps to fully enforce it.
    ================================================================ */
-const appCheck = initializeAppCheck(fbApp, {
-    provider: new ReCaptchaV3Provider(
-        '6Lft35AsAAAAAFrThcPtW0rT84_EmYQ7spngIFRk'
-    ),
-    isTokenAutoRefreshEnabled: true
-});
+let appCheck = null;
+try {
+    appCheck = initializeAppCheck(fbApp, {
+        provider: new ReCaptchaV3Provider(
+            '6Lft35AsAAAAAFrThcPtW0rT84_EmYQ7spngIFRk'
+        ),
+        isTokenAutoRefreshEnabled: true
+    });
+} catch (e) {
+    // App Check unavailable — Firebase still works, just unprotected.
+    // Check Firebase Console → App Check and ensure medlabsolve.com is registered.
+}
 
 /* ================================================================
    CONSTANTS
@@ -191,6 +205,19 @@ async function init() {
     }
 }
 init();
+
+/* ================================================================
+   ONLINE / OFFLINE LISTENER
+   FIX: Shows a persistent toast when the device loses or regains
+   connectivity. Prevents the confusing "No internet connection"
+   error from appearing out of nowhere during a session.
+   ================================================================ */
+window.addEventListener('offline', function() {
+    showToast('📶 You are offline. Please check your internet connection.', 'error', 8000);
+});
+window.addEventListener('online', function() {
+    showToast('✅ Back online!', 'success', 3000);
+});
 
 /* ================================================================
    THEME
@@ -753,8 +780,12 @@ async function savePublicProfile() {
 async function fbRegister() {
     const username  = document.getElementById('u-in').value.trim();
     const password  = document.getElementById('p-in').value.trim();
-    const hint      = document.getElementById('hint-in').value.trim();
-    const av        = document.getElementById('avatar-in').value;
+    // FIX: safe null-check — hint-in may not exist in every HTML layout;
+    // previously this threw TypeError → silently swallowed as "Registration failed."
+    const hintEl    = document.getElementById('hint-in');
+    const hint      = hintEl ? hintEl.value.trim() : '';
+    const avEl      = document.getElementById('avatar-in');
+    const av        = avEl ? avEl.value : '👤';
     const codeEl    = document.getElementById('invite-code-in');
     const invitedBy = codeEl ? codeEl.value.trim().toUpperCase() : null;
 
@@ -768,7 +799,6 @@ async function fbRegister() {
         showToast('Password must be at least ' + LIMITS.PASSWORD_MIN + ' characters.', 'error');
         return;
     }
-    // FIX: hint length cap
     if (hint.length > LIMITS.HINT_MAX) {
         showToast('Security hint must be under ' + LIMITS.HINT_MAX + ' characters.', 'error');
         return;
@@ -776,31 +806,40 @@ async function fbRegister() {
 
     const finalAvatar = (av === 'custom' && customImg) ? customImg : av;
 
-    // FIX: avatar size check before any Firestore write
     if (finalAvatar && finalAvatar.length > LIMITS.AVATAR_MAX) {
         showToast('Avatar image is too large. Please use a smaller photo.', 'error');
         return;
     }
 
-    const fakeEmail = username.toLowerCase() + '@medlabquiz.local';
+    // FIX: connectivity pre-check
+    if (!navigator.onLine) {
+        showToast('No internet connection. Please check your network and try again.', 'error', 4000);
+        return;
+    }
+
+    // FIX: normalize username to lowercase for both Firebase Auth email AND
+    // the usernames Firestore collection key, so "Kenny" and "kenny" are
+    // treated as the same account. Firebase Auth treats emails case-insensitively
+    // already; now Firestore matches that behaviour.
+    const usernameLower = username.toLowerCase();
+    const fakeEmail     = usernameLower + '@medlabquiz.local';
+
     try {
         showToast('Creating account…', 'info', 5000);
 
-        // FIX #4 & #9: Use a Firestore transaction to atomically check
-        // username availability AND reserve it in one operation.
-        // Previously: check → [window] → write was a TOCTOU race —
-        // two simultaneous registrations would both pass the check.
-        // Now the transaction fails if another write landed first.
-        // If any subsequent Firestore write fails, we delete the
-        // newly-created Auth account so it doesn't become an orphan.
         let cred;
         try {
             cred = await createUserWithEmailAndPassword(fbAuth, fakeEmail, password);
         } catch (authErr) {
-            if (authErr.code === 'auth/email-already-in-use') {
-                showToast('Username already taken.', 'error');
-            } else if (authErr.code === 'auth/weak-password') {
+            const code = authErr.code || '';
+            if (code === 'auth/email-already-in-use') {
+                showToast('Username already taken. Please choose another.', 'error');
+            } else if (code === 'auth/weak-password') {
                 showToast('Password must be at least ' + LIMITS.PASSWORD_MIN + ' characters.', 'error');
+            } else if (code === 'auth/network-request-failed' || !navigator.onLine) {
+                showToast('No internet connection. Please check your network and try again.', 'error', 4000);
+            } else if (code === 'auth/app-check-token-expired' || code === 'auth/requests-from-referer-blocked') {
+                showToast('Registration blocked by security policy. Contact the admin.', 'error', 5000);
             } else {
                 showToast('Registration failed. Please try again.', 'error');
             }
@@ -811,18 +850,18 @@ async function fbRegister() {
         const inviteCode = generateInviteCode(username);
 
         try {
-            // Atomic transaction: reserve username or throw if taken
+            // Atomic transaction: reserve username (lowercase key) or throw if taken
             await runTransaction(fbDb, async function(tx) {
-                const usernameRef  = doc(fbDb, 'usernames', username);
+                // FIX: use lowercase so "Jesse" and "jesse" collide correctly
+                const usernameRef  = doc(fbDb, 'usernames', usernameLower);
                 const usernameSnap = await tx.get(usernameRef);
                 if (usernameSnap.exists()) {
                     throw new Error('USERNAME_TAKEN');
                 }
-                // Reserve the username
-                tx.set(usernameRef, { uid, hint });
+                // Store lowercase key but preserve display casing
+                tx.set(usernameRef, { uid, hint, displayUsername: username });
             });
 
-            // Username reserved — now write the rest in a batch
             const batch = writeBatch(fbDb);
             batch.set(doc(fbDb, 'users', uid), {
                 username,
@@ -850,7 +889,7 @@ async function fbRegister() {
             await batch.commit();
 
         } catch (fsErr) {
-            // FIX #9: clean up the Auth account so it doesn't become an orphan
+            // Clean up the Auth account so it doesn't become an orphan
             try { await cred.user.delete(); } catch(e) { /* ignore */ }
             if (fsErr.message === 'USERNAME_TAKEN') {
                 showToast('Username already taken. Please choose another.', 'error', 4000);
@@ -860,12 +899,17 @@ async function fbRegister() {
             return;
         }
 
+        // FIX: clear all fields after successful registration
+        document.getElementById('u-in').value = '';
+        document.getElementById('p-in').value = '';
+        if (hintEl) hintEl.value = '';
+        if (codeEl) codeEl.value = '';
         customImg = null;
         showToast('Account created! Please log in. ✅', 'success', 3500);
         setTimeout(function() { setAuthMode('login'); }, 400);
+
     } catch (err) {
-        // Outer catch for unexpected errors (network, etc.)
-        showToast('Registration failed. Please try again.', 'error');
+        showToast('Registration failed. Please check your connection and try again.', 'error', 4000);
     }
 }
 
@@ -886,11 +930,29 @@ async function fbLogin() {
     if (!username) { showToast('Please enter a username.', 'error'); return; }
     if (!password) { showToast('Please enter a password.', 'error'); return; }
 
-    // FIX: Set persistence BEFORE signing in so Remember Me is honoured.
-    // browserLocalPersistence = survives tab/browser close (true remember me).
-    // browserSessionPersistence = cleared when the tab is closed.
-    await setPersistence(fbAuth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+    // FIX: validate username format before hitting Firebase — gives the user
+    // a clear instant message instead of a confusing Firebase auth error
+    // for usernames with invalid characters (e.g. kenny2052## or spaces).
+    if (!USERNAME_RE.test(username)) {
+        showToast('Username must be 3–20 characters: letters, numbers, underscore only.', 'error', 4000);
+        return;
+    }
 
+    // FIX: pre-flight connectivity check. Firebase SDK can misreport
+    // App Check failures or reCAPTCHA load errors as network errors.
+    // navigator.onLine gives a quick browser-level signal so we can
+    // show "No internet" only when actually offline.
+    if (!navigator.onLine) {
+        showToast('No internet connection. Please check your network and try again.', 'error', 4000);
+        return;
+    }
+
+    // FIX: Set persistence BEFORE signing in so Remember Me is honoured.
+    try {
+        await setPersistence(fbAuth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+    } catch (e) { /* persistence failure is non-fatal — proceed with default */ }
+
+    // FIX: must use lowercase to match the email created during registration
     const fakeEmail = username.toLowerCase() + '@medlabquiz.local';
     try {
         showToast('Signing in…', 'info', 5000);
@@ -900,7 +962,7 @@ async function fbLogin() {
     } catch (err) {
         loginFailed();      // FIX: increment counter on failure
         const code = err.code || '';
-        if (code === 'auth/network-request-failed') {
+        if (!navigator.onLine || code === 'auth/network-request-failed') {
             showToast('No internet connection. Please check your network and try again.', 'error', 4000);
         } else if (code === 'auth/too-many-requests') {
             showToast('Too many attempts. Please wait a few minutes and try again.', 'error', 4000);
@@ -908,6 +970,9 @@ async function fbLogin() {
             showToast('This account has been disabled. Contact support.', 'error', 4000);
         } else if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
             showToast('Invalid username or password.', 'error');
+        } else if (code === 'auth/app-check-token-expired' || code === 'auth/requests-from-referer-blocked') {
+            // App Check domain not registered in Firebase Console
+            showToast('Sign-in blocked by security policy. Contact the admin.', 'error', 5000);
         } else {
             showToast('Login failed. Check your connection and try again.', 'error', 4000);
         }
@@ -936,8 +1001,8 @@ async function fbForgot() {
     try {
         showToast('Checking…', 'info', 5000);
 
-        // FIX: single direct document read instead of scanning all users
-        const snap = await getDoc(doc(fbDb, 'usernames', username));
+        // FIX: use lowercase key to match how usernames are stored during registration
+        const snap = await getDoc(doc(fbDb, 'usernames', username.toLowerCase()));
 
         if (snap.exists() && snap.data().hint === hint) {
             loginSucceeded();
@@ -1303,11 +1368,27 @@ async function fbLoadChallenges() {
     if (!list || !myName) return;
 
     try {
-        const snap = await getDocs(collection(fbDb, 'challenges'));
+        // FIX: Use targeted where() queries instead of getDocs(collection(...)).
+        // The old code fetched ALL challenges and filtered client-side, which:
+        //   1. Violated Firestore rules (unfiltered list queries need allow list
+        //      but field-condition checks only work on allow get / allow read).
+        //   2. Downloaded every challenge doc for every user — wasteful at scale.
+        // Now we run two targeted queries (from==me, to==me) and merge results.
+        const [fromSnap, toSnap] = await Promise.all([
+            getDocs(query(collection(fbDb, 'challenges'), where('from', '==', myName))),
+            getDocs(query(collection(fbDb, 'challenges'), where('to',   '==', myName)))
+        ]);
+
+        const seen = new Set();
         const all  = [];
-        snap.forEach(function(d) {
-            const ch = d.data(); ch._id = d.id;
-            if (ch.from === myName || ch.to === myName) all.push(ch);
+        [fromSnap, toSnap].forEach(function(snap) {
+            snap.forEach(function(d) {
+                if (!seen.has(d.id)) {
+                    seen.add(d.id);
+                    const ch = d.data(); ch._id = d.id;
+                    all.push(ch);
+                }
+            });
         });
         all.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
         list.innerHTML = '';
@@ -1327,14 +1408,12 @@ async function fbLoadChallenges() {
             else if (ch.status === 'beaten')  badge = '<span class="ch-badge beaten">🏆 Beaten!</span>';
 
             if (isIncoming) {
-                // FIX: esc() on all Firestore strings
                 card.innerHTML =
                     '<div class="ch-header">' + badge + '<span class="ch-tag incoming-tag">INCOMING</span></div>' +
                     '<b>' + esc(ch.from) + '</b> challenges you on <b>' + esc(ch.topic) + '</b><br>' +
                     '<span style="color:var(--danger);font-weight:800;">Beat their score: ' + Number(ch.score) + '</span>';
 
                 if (ch.status === 'pending') {
-                    // FIX: createElement + dataset instead of onclick string
                     const btn = document.createElement('button');
                     btn.className = 'btn primary sm';
                     btn.style.cssText = 'margin-top:10px;width:100%;';
@@ -1358,7 +1437,6 @@ async function fbLoadChallenges() {
                     card.appendChild(btn);
                 }
             } else {
-                // FIX: esc() on all Firestore strings
                 card.innerHTML =
                     '<div class="ch-header">' + badge + '<span class="ch-tag outgoing-tag">OUTGOING</span></div>' +
                     'You challenged <b>' + esc(ch.to) + '</b> on <b>' + esc(ch.topic) + '</b><br>' +
@@ -1536,23 +1614,24 @@ async function fbCheckChallengeResult(finalScore) {
     window._activeChallengeId = null;
 }
 
-/* ================================================================
-   CHALLENGE BANNER
-   FIX: n.msg previously went into innerHTML directly —
-   a stored notification message containing HTML would execute.
-   Now rendered with textContent, which never parses markup.
-   ================================================================ */
 async function fbLoadChallengeBanner() {
     const myName = window.userDoc ? window.userDoc.username : '';
     const banner = document.getElementById('challenge-banner');
     if (!banner || !myName) return;
     try {
-        const snap    = await getDocs(collection(fbDb, 'challenges'));
+        // FIX: Use a targeted where() query instead of getDocs(collection(...)).
+        // The old unfiltered query was blocked by Firestore rules (field-condition
+        // checks on resource.data only work on allow get, not allow list without
+        // a matching where clause). Now we only fetch challenges sent TO the user
+        // with status == 'pending' — exactly what the banner needs.
+        const pendingSnap = await getDocs(
+            query(collection(fbDb, 'challenges'),
+                where('to',     '==', myName),
+                where('status', '==', 'pending'))
+        );
         const pending = [];
-        snap.forEach(function(d) {
-            const ch = d.data();
-            if (ch.to === myName && ch.status === 'pending') pending.push(ch);
-        });
+        pendingSnap.forEach(function(d) { pending.push(d.data()); });
+
         const notifs = (window.userDoc.notifications || []).filter(function(n) { return !n.seen; });
         if (pending.length === 0 && notifs.length === 0) { banner.classList.add('hidden'); return; }
 
@@ -1562,7 +1641,6 @@ async function fbLoadChallengeBanner() {
         notifs.forEach(function(n) {
             const el = document.createElement('div');
             el.className = 'challenge-notif';
-            // FIX: textContent — never innerHTML for stored notification messages
             el.textContent = '🏆 ' + n.msg;
             banner.appendChild(el);
         });
@@ -1570,7 +1648,6 @@ async function fbLoadChallengeBanner() {
         if (pending.length > 0) {
             const el = document.createElement('div');
             el.className = 'challenge-notif incoming-notif';
-            // This string has no Firestore data in it — just a count (integer) — safe
             el.innerHTML = '⚔️ You have <b>' + pending.length + '</b> pending challenge' +
                            (pending.length > 1 ? 's' : '') +
                            '! <button class="btn primary sm" style="margin-left:8px;" onclick="showShare()">View →</button>';
@@ -1583,11 +1660,12 @@ async function fbLoadChallengeBanner() {
    AUTH STATE OBSERVER
    ================================================================ */
 onAuthStateChanged(fbAuth, async function(fbUser) {
-    if (fbUser) {
+    if (!fbUser) return;   // Not signed in — auth screen already visible
+    try {
         const data = await loadUserDoc(fbUser.uid);
         if (data) {
             if (data.disabled) {
-                signOut(fbAuth);
+                await signOut(fbAuth);
                 hideAll();
                 document.getElementById('auth-s').classList.remove('hidden');
                 setAuthMode('login');
@@ -1596,13 +1674,26 @@ onAuthStateChanged(fbAuth, async function(fbUser) {
             }
             showLoginLoader(function() { fbShowMain(); });
         } else {
-            // FIX: loadUserDoc returned null — Firestore doc missing or read failed.
-            // Sign out cleanly and show an actionable error instead of leaving
-            // the user silently stuck on a blank screen.
+            // Firestore doc missing — registration may have partially failed.
             await signOut(fbAuth);
             hideAll();
             document.getElementById('auth-s').classList.remove('hidden');
-            showToast('Could not load your account. Please try again.', 'error', 4000);
+            showToast('Account data not found. Please register a new account or contact support.', 'error', 5000);
+        }
+    } catch (err) {
+        // FIX: Without this catch an async throw (network error, Firestore
+        // permission-denied, App Check rejection) was silently swallowed,
+        // leaving the user on a blank screen with no feedback.
+        try { await signOut(fbAuth); } catch (e) { /* ignore */ }
+        hideAll();
+        document.getElementById('auth-s').classList.remove('hidden');
+        const code = err.code || '';
+        if (code === 'permission-denied') {
+            showToast('Access denied. Please check your connection and try again.', 'error', 5000);
+        } else if (code === 'unavailable' || code === 'auth/network-request-failed' || !navigator.onLine) {
+            showToast('No internet connection. Please check your network and try again.', 'error', 5000);
+        } else {
+            showToast('Could not load your account. Please check your connection and try again.', 'error', 5000);
         }
     }
 });
@@ -1673,6 +1764,12 @@ async function adminLoadPlayers() {
     listEl.innerHTML  = '<p style="text-align:center;color:var(--muted);padding:20px;">Loading players…</p>';
     statsEl.innerHTML = '';
 
+    // FIX: connectivity pre-check so admins get a clear message if offline
+    if (!navigator.onLine) {
+        listEl.innerHTML = '<p style="color:var(--danger);text-align:center;padding:16px;">No internet connection. Please check your network.</p>';
+        return;
+    }
+
     try {
         const snap = await getDocs(collection(fbDb, 'users'));
         window._adminPlayers = [];
@@ -1698,7 +1795,28 @@ async function adminLoadPlayers() {
         adminRenderPlayers(window._adminPlayers);
 
     } catch (err) {
-        listEl.innerHTML = '<p style="color:var(--danger);text-align:center;">Could not load players.</p>';
+        // FIX: distinguish permission-denied (Firestore rules need updating)
+        // from genuine network errors — previously both showed the same
+        // useless "Could not load players." with no actionable guidance.
+        const code = (err.code || '');
+        let msg = '';
+        if (code === 'permission-denied') {
+            msg = '⚠️ Firestore rules are blocking admin reads.<br>' +
+                  'Go to Firebase Console → Firestore → Rules and add a rule:<br>' +
+                  '<code style="font-size:0.75rem;background:var(--surface);padding:2px 6px;border-radius:4px;">' +
+                  'allow read: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin"' +
+                  '</code>';
+        } else if (!navigator.onLine || code === 'unavailable') {
+            msg = '📶 No internet connection. Please check your network and try again.';
+        } else {
+            msg = 'Could not load players. Please try again.';
+        }
+        // FIX: add a retry button so the admin doesn't have to navigate away
+        listEl.innerHTML =
+            '<div style="text-align:center;padding:20px;">' +
+                '<p style="color:var(--danger);margin-bottom:12px;">' + msg + '</p>' +
+                '<button class="btn secondary sm" onclick="adminLoadPlayers()">🔄 Retry</button>' +
+            '</div>';
     }
 }
 
@@ -1926,13 +2044,13 @@ async function adminDeleteUser(uid, username) {
     if (!confirm('Permanently DELETE ' + username + '? This removes all their data and cannot be undone.')) return;
     if (!confirm('Are you absolutely sure? This is irreversible.')) return;
     try {
-        // FIX #2: Delete from ALL three Firestore collections, not just users.
-        // Previously only users/{uid} was tombstoned, leaving ghost entries in
-        // leaderboard and usernames, and the username permanently squatted.
+        // FIX: Delete from ALL three Firestore collections atomically.
+        // FIX: Use username.toLowerCase() for the usernames collection key
+        // to match how it was stored during registration.
         const batch = writeBatch(fbDb);
         batch.delete(doc(fbDb, 'users',       uid));
         batch.delete(doc(fbDb, 'leaderboard', uid));
-        batch.delete(doc(fbDb, 'usernames',   username));
+        batch.delete(doc(fbDb, 'usernames',   username.toLowerCase()));
         await batch.commit();
 
         // NOTE: The Firebase Auth account itself cannot be deleted from the
@@ -1968,20 +2086,29 @@ async function adminBroadcast() {
 
     try {
         const snap = await getDocs(collection(fbDb, 'users'));
-        const batch = [];
-        snap.forEach(function(d) { batch.push({ id: d.id, data: d.data() }); });
+        const users = [];
+        snap.forEach(function(d) {
+            const data = d.data();
+            // FIX: skip deleted/disabled accounts
+            if (data._deleted) return;
+            users.push({ id: d.id, data });
+        });
 
+        // FIX: Use writeBatch instead of N individual setDoc calls.
+        // Firestore allows max 500 operations per batch, so chunk if needed.
+        const CHUNK = 400;
         var sent = 0;
-        for (var i = 0; i < batch.length; i++) {
-            const u      = batch[i];
-            // FIX: skip deleted accounts
-            if (u.data._deleted) continue;
-            const notifs = (u.data.notifications || []);
-            notifs.unshift({ msg: '📢 ' + msg, seen: false, ts: Date.now() });
-            await setDoc(doc(fbDb, 'users', u.id), Object.assign({}, u.data, {
-                notifications: notifs.slice(0, 10)
-            }));
-            sent++;
+        for (var start = 0; start < users.length; start += CHUNK) {
+            const chunk = users.slice(start, start + CHUNK);
+            const batch = writeBatch(fbDb);
+            chunk.forEach(function(u) {
+                const notifs = (u.data.notifications || []).slice();
+                notifs.unshift({ msg: '📢 ' + msg, seen: false, ts: Date.now() });
+                batch.set(doc(fbDb, 'users', u.id),
+                    Object.assign({}, u.data, { notifications: notifs.slice(0, 10) }));
+                sent++;
+            });
+            await batch.commit();
         }
 
         document.getElementById('broadcast-msg').value = '';
