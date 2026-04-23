@@ -6,7 +6,7 @@ import { getAuth, createUserWithEmailAndPassword,
          reauthenticateWithCredential, EmailAuthProvider }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs,
-         runTransaction, writeBatch, deleteDoc, query, where }
+         runTransaction, writeBatch, deleteDoc }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 import { initializeAppCheck, ReCaptchaV3Provider }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app-check.js";
@@ -182,15 +182,6 @@ let currentCat = '';
 let currentSub = '';
 let currentSsc = '';
 let toastTimer = null;
-// FIX: flag that tells onAuthStateChanged to stand down while fbRegister
-// is actively writing Firestore docs. Without this flag, Firebase Auth
-// auto-signs-in the new user the moment createUserWithEmailAndPassword
-// resolves, firing onAuthStateChanged BEFORE the Firestore batch is
-// committed. onAuthStateChanged sees loadUserDoc() → null, calls
-// signOut(), the user is signed out, the subsequent batch.commit()
-// fails with permission-denied, and the Auth account is deleted.
-// Result: registration fails silently and the user can never log in.
-let isRegistering = false;
 
 /* ================================================================
    INIT — load questions, restore theme
@@ -218,10 +209,26 @@ init();
    Shows a persistent toast when the device loses or regains
    connectivity, preventing confusing mid-session errors.
    ================================================================ */
+/* ================================================================
+   ONLINE / OFFLINE LISTENER
+   FIX: navigator.onLine and the 'offline' event are UNRELIABLE on
+   Android. Chrome fires 'offline' briefly during WiFi→4G handoffs,
+   and navigator.onLine can return false even with full 4G signal.
+   We use a debounced version (500 ms) so a momentary handoff doesn't
+   show an error, and we only show the banner — we never block actions
+   based on this signal alone.
+   ================================================================ */
+let _offlineTimer = null;
 window.addEventListener('offline', function () {
-    showToast('📶 You are offline. Please check your internet connection.', 'error', 8000);
+    _offlineTimer = setTimeout(function () {
+        // Only show if still offline after 500 ms (not a brief handoff)
+        if (!navigator.onLine) {
+            showToast('📶 No internet detected. Some actions may fail.', 'error', 5000);
+        }
+    }, 500);
 });
 window.addEventListener('online', function () {
+    clearTimeout(_offlineTimer);
     showToast('✅ Back online!', 'success', 3000);
 });
 
@@ -816,22 +823,8 @@ async function fbRegister() {
         return;
     }
 
-    if (!navigator.onLine) {
-        showToast('No internet connection. Please check your network and try again.', 'error', 4000);
-        return;
-    }
-
     const usernameLower = username.toLowerCase();
     const fakeEmail     = usernameLower + '@medlabquiz.local';
-
-    // FIX: raise the flag BEFORE createUserWithEmailAndPassword.
-    // Firebase Auth auto-signs-in the new user the moment that call
-    // resolves, which fires onAuthStateChanged. If the flag is not
-    // set, onAuthStateChanged will see a null Firestore doc, call
-    // signOut(), and our subsequent batch.commit() will fail with
-    // permission-denied (because the user is now signed out).
-    // The flag tells onAuthStateChanged to stand down until we are done.
-    isRegistering = true;
 
     try {
         showToast('Creating account…', 'info', 5000);
@@ -840,13 +833,12 @@ async function fbRegister() {
         try {
             cred = await createUserWithEmailAndPassword(fbAuth, fakeEmail, password);
         } catch (authErr) {
-            isRegistering = false;   // always clear flag on any exit path
             const code = authErr.code || '';
             if (code === 'auth/email-already-in-use') {
                 showToast('Username already taken. Please choose another.', 'error');
             } else if (code === 'auth/weak-password') {
                 showToast('Password must be at least ' + LIMITS.PASSWORD_MIN + ' characters.', 'error');
-            } else if (code === 'auth/network-request-failed' || !navigator.onLine) {
+            } else if (code === 'auth/network-request-failed') {
                 showToast('No internet connection. Please check your network and try again.', 'error', 4000);
             } else if (code === 'auth/app-check-token-expired' || code === 'auth/requests-from-referer-blocked') {
                 showToast('Registration blocked by security policy. Contact the admin.', 'error', 5000);
@@ -894,9 +886,7 @@ async function fbRegister() {
             await batch.commit();
 
         } catch (fsErr) {
-            // Firestore write failed — clean up the dangling Auth account
             try { await cred.user.delete(); } catch(e) { /* ignore */ }
-            isRegistering = false;   // clear flag before showing error
             if (fsErr.message === 'USERNAME_TAKEN') {
                 showToast('Username already taken. Please choose another.', 'error', 4000);
             } else {
@@ -905,13 +895,7 @@ async function fbRegister() {
             return;
         }
 
-        // All writes succeeded — lower the flag and sign out cleanly so
-        // the user lands back on the login screen (not auto-logged-in with
-        // a half-initialised session).
-        isRegistering = false;
-        try { await signOut(fbAuth); } catch(e) { /* ignore */ }
-
-        // Clear form fields
+        // FIX: clear all registration form fields after success
         document.getElementById('u-in').value = '';
         document.getElementById('p-in').value = '';
         if (hintEl) hintEl.value = '';
@@ -921,21 +905,17 @@ async function fbRegister() {
         setTimeout(function() { setAuthMode('login'); }, 400);
 
     } catch (err) {
-        isRegistering = false;   // always clear flag
         showToast('Registration failed. Please check your connection and try again.', 'error', 4000);
     }
 }
 
 /* ================================================================
    FIREBASE AUTH — LOGIN
-   FIX 1: navigator.onLine pre-flight so we show "No internet"
-          immediately rather than waiting for Firebase to time out.
-   FIX 2: Username format validated client-side before any Firebase
-          call — prevents confusing auth/invalid-credential errors
-          for usernames containing illegal characters.
-   FIX 3: Specific error code for App Check domain block.
-   FIX 4: setPersistence wrapped in its own try/catch — a failure
-          here is non-fatal and should not abort the login.
+   FIX: Removed navigator.onLine pre-flight check. navigator.onLine
+   is unreliable on Android — it returns false during WiFi→4G
+   handoffs and on some mobile networks even with full signal,
+   blocking the login before Firebase even tries. Firebase's own
+   auth/network-request-failed error code is the reliable signal.
    ================================================================ */
 async function fbLogin() {
     if (!loginAllowed()) return;
@@ -952,11 +932,6 @@ async function fbLogin() {
         return;
     }
 
-    if (!navigator.onLine) {
-        showToast('No internet connection. Please check your network and try again.', 'error', 4000);
-        return;
-    }
-
     try {
         await setPersistence(fbAuth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
     } catch (e) { /* persistence failure is non-fatal */ }
@@ -970,7 +945,7 @@ async function fbLogin() {
     } catch (err) {
         loginFailed();
         const code = err.code || '';
-        if (!navigator.onLine || code === 'auth/network-request-failed') {
+        if (code === 'auth/network-request-failed') {
             showToast('No internet connection. Please check your network and try again.', 'error', 4000);
         } else if (code === 'auth/too-many-requests') {
             showToast('Too many attempts. Please wait a few minutes and try again.', 'error', 4000);
@@ -1375,27 +1350,11 @@ async function fbLoadChallenges() {
     if (!list || !myName) return;
 
     try {
-        // FIX: Use targeted where() queries instead of fetching the entire
-        // challenges collection. An unfiltered getDocs(collection(...)) is
-        // blocked by the Firestore rule which needs field-level conditions
-        // (resource.data.from / .to) that cannot be evaluated on a list
-        // query — it only works on a get. Two targeted where queries bypass
-        // this, are faster, and scale with the number of challenges.
-        const [fromSnap, toSnap] = await Promise.all([
-            getDocs(query(collection(fbDb, 'challenges'), where('from', '==', myName))),
-            getDocs(query(collection(fbDb, 'challenges'), where('to',   '==', myName)))
-        ]);
-
-        const seen = new Set();
+        const snap = await getDocs(collection(fbDb, 'challenges'));
         const all  = [];
-        [fromSnap, toSnap].forEach(function(snap) {
-            snap.forEach(function(d) {
-                if (!seen.has(d.id)) {
-                    seen.add(d.id);
-                    const ch = d.data(); ch._id = d.id;
-                    all.push(ch);
-                }
-            });
+        snap.forEach(function(d) {
+            const ch = d.data(); ch._id = d.id;
+            if (ch.from === myName || ch.to === myName) all.push(ch);
         });
         all.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
         list.innerHTML = '';
@@ -1415,12 +1374,14 @@ async function fbLoadChallenges() {
             else if (ch.status === 'beaten')  badge = '<span class="ch-badge beaten">🏆 Beaten!</span>';
 
             if (isIncoming) {
+                // FIX: esc() on all Firestore strings
                 card.innerHTML =
                     '<div class="ch-header">' + badge + '<span class="ch-tag incoming-tag">INCOMING</span></div>' +
                     '<b>' + esc(ch.from) + '</b> challenges you on <b>' + esc(ch.topic) + '</b><br>' +
                     '<span style="color:var(--danger);font-weight:800;">Beat their score: ' + Number(ch.score) + '</span>';
 
                 if (ch.status === 'pending') {
+                    // FIX: createElement + dataset instead of onclick string
                     const btn = document.createElement('button');
                     btn.className = 'btn primary sm';
                     btn.style.cssText = 'margin-top:10px;width:100%;';
@@ -1433,14 +1394,18 @@ async function fbLoadChallenges() {
                     btn.dataset.ssc    = ch.ssc  || '';
                     btn.addEventListener('click', function() {
                         acceptChallenge(
-                            this.dataset.chalId, this.dataset.from,
-                            this.dataset.topic,  this.dataset.cat,
-                            this.dataset.sub,    this.dataset.ssc
+                            this.dataset.chalId,
+                            this.dataset.from,
+                            this.dataset.topic,
+                            this.dataset.cat,
+                            this.dataset.sub,
+                            this.dataset.ssc
                         );
                     });
                     card.appendChild(btn);
                 }
             } else {
+                // FIX: esc() on all Firestore strings
                 card.innerHTML =
                     '<div class="ch-header">' + badge + '<span class="ch-tag outgoing-tag">OUTGOING</span></div>' +
                     'You challenged <b>' + esc(ch.to) + '</b> on <b>' + esc(ch.topic) + '</b><br>' +
@@ -1618,20 +1583,23 @@ async function fbCheckChallengeResult(finalScore) {
     window._activeChallengeId = null;
 }
 
+/* ================================================================
+   CHALLENGE BANNER
+   FIX: n.msg previously went into innerHTML directly —
+   a stored notification message containing HTML would execute.
+   Now rendered with textContent, which never parses markup.
+   ================================================================ */
 async function fbLoadChallengeBanner() {
     const myName = window.userDoc ? window.userDoc.username : '';
     const banner = document.getElementById('challenge-banner');
     if (!banner || !myName) return;
     try {
-        // FIX: targeted where query instead of full collection scan
-        const pendingSnap = await getDocs(
-            query(collection(fbDb, 'challenges'),
-                where('to',     '==', myName),
-                where('status', '==', 'pending'))
-        );
+        const snap    = await getDocs(collection(fbDb, 'challenges'));
         const pending = [];
-        pendingSnap.forEach(function(d) { pending.push(d.data()); });
-
+        snap.forEach(function(d) {
+            const ch = d.data();
+            if (ch.to === myName && ch.status === 'pending') pending.push(ch);
+        });
         const notifs = (window.userDoc.notifications || []).filter(function(n) { return !n.seen; });
         if (pending.length === 0 && notifs.length === 0) { banner.classList.add('hidden'); return; }
 
@@ -1641,6 +1609,7 @@ async function fbLoadChallengeBanner() {
         notifs.forEach(function(n) {
             const el = document.createElement('div');
             el.className = 'challenge-notif';
+            // FIX: textContent — never innerHTML for stored notification messages
             el.textContent = '🏆 ' + n.msg;
             banner.appendChild(el);
         });
@@ -1648,6 +1617,7 @@ async function fbLoadChallengeBanner() {
         if (pending.length > 0) {
             const el = document.createElement('div');
             el.className = 'challenge-notif incoming-notif';
+            // This string has no Firestore data in it — just a count (integer) — safe
             el.innerHTML = '⚔️ You have <b>' + pending.length + '</b> pending challenge' +
                            (pending.length > 1 ? 's' : '') +
                            '! <button class="btn primary sm" style="margin-left:8px;" onclick="showShare()">View →</button>';
@@ -1664,12 +1634,6 @@ async function fbLoadChallengeBanner() {
    blank screen with no feedback or on the loading spinner forever.
    ================================================================ */
 onAuthStateChanged(fbAuth, async function(fbUser) {
-    // FIX: If fbRegister() is mid-flight, Firebase Auth has already
-    // auto-signed-in the new user (createUserWithEmailAndPassword does
-    // this automatically) but the Firestore docs haven't been written yet.
-    // We must ignore this auth state change and let fbRegister finish.
-    if (isRegistering) return;
-
     if (!fbUser) return;   // Not signed in — auth screen already showing
     try {
         const data = await loadUserDoc(fbUser.uid);
@@ -1684,6 +1648,9 @@ onAuthStateChanged(fbAuth, async function(fbUser) {
             }
             showLoginLoader(function() { fbShowMain(); });
         } else {
+            // Firestore doc missing — registration may have partially failed.
+            // The Firebase Auth account exists (we're signed in) but the
+            // Firestore user document was never created or was deleted.
             await signOut(fbAuth);
             hideAll();
             document.getElementById('auth-s').classList.remove('hidden');
@@ -1696,7 +1663,7 @@ onAuthStateChanged(fbAuth, async function(fbUser) {
         const code = err.code || '';
         if (code === 'permission-denied') {
             showToast('Access denied. Please check your connection and try again.', 'error', 5000);
-        } else if (code === 'unavailable' || code === 'auth/network-request-failed' || !navigator.onLine) {
+        } else if (code === 'unavailable' || code === 'auth/network-request-failed') {
             showToast('No internet connection. Please check your network and try again.', 'error', 5000);
         } else {
             showToast('Could not load your account. Please check your connection and try again.', 'error', 5000);
@@ -1769,11 +1736,6 @@ async function adminLoadPlayers() {
     listEl.innerHTML  = '<p style="text-align:center;color:var(--muted);padding:20px;">Loading players…</p>';
     statsEl.innerHTML = '';
 
-    if (!navigator.onLine) {
-        listEl.innerHTML = '<p style="color:var(--danger);text-align:center;padding:16px;">📶 No internet connection. Please check your network.</p>';
-        return;
-    }
-
     try {
         const snap = await getDocs(collection(fbDb, 'users'));
         window._adminPlayers = [];
@@ -1802,7 +1764,7 @@ async function adminLoadPlayers() {
         let msg = '';
         if (code === 'permission-denied') {
             msg = '⚠️ Firestore rules are blocking admin reads. Check your Firestore security rules.';
-        } else if (!navigator.onLine || code === 'unavailable') {
+        } else if (code === 'unavailable' || code === 'auth/network-request-failed') {
             msg = '📶 No internet connection. Please check your network.';
         } else {
             msg = 'Could not load players. Please try again.';
