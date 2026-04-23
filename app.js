@@ -6,7 +6,7 @@ import { getAuth, createUserWithEmailAndPassword,
          reauthenticateWithCredential, EmailAuthProvider }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs,
-         runTransaction, writeBatch, deleteDoc }
+         runTransaction, writeBatch, deleteDoc, query, where }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 import { initializeAppCheck, ReCaptchaV3Provider }
     from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app-check.js";
@@ -182,6 +182,15 @@ let currentCat = '';
 let currentSub = '';
 let currentSsc = '';
 let toastTimer = null;
+// FIX: flag that tells onAuthStateChanged to stand down while fbRegister
+// is actively writing Firestore docs. Without this flag, Firebase Auth
+// auto-signs-in the new user the moment createUserWithEmailAndPassword
+// resolves, firing onAuthStateChanged BEFORE the Firestore batch is
+// committed. onAuthStateChanged sees loadUserDoc() → null, calls
+// signOut(), the user is signed out, the subsequent batch.commit()
+// fails with permission-denied, and the Auth account is deleted.
+// Result: registration fails silently and the user can never log in.
+let isRegistering = false;
 
 /* ================================================================
    INIT — load questions, restore theme
@@ -812,10 +821,17 @@ async function fbRegister() {
         return;
     }
 
-    // FIX: lowercase key for Auth email and Firestore usernames collection
-    // so "Jesse" and "jesse" are always treated as the same account.
     const usernameLower = username.toLowerCase();
     const fakeEmail     = usernameLower + '@medlabquiz.local';
+
+    // FIX: raise the flag BEFORE createUserWithEmailAndPassword.
+    // Firebase Auth auto-signs-in the new user the moment that call
+    // resolves, which fires onAuthStateChanged. If the flag is not
+    // set, onAuthStateChanged will see a null Firestore doc, call
+    // signOut(), and our subsequent batch.commit() will fail with
+    // permission-denied (because the user is now signed out).
+    // The flag tells onAuthStateChanged to stand down until we are done.
+    isRegistering = true;
 
     try {
         showToast('Creating account…', 'info', 5000);
@@ -824,6 +840,7 @@ async function fbRegister() {
         try {
             cred = await createUserWithEmailAndPassword(fbAuth, fakeEmail, password);
         } catch (authErr) {
+            isRegistering = false;   // always clear flag on any exit path
             const code = authErr.code || '';
             if (code === 'auth/email-already-in-use') {
                 showToast('Username already taken. Please choose another.', 'error');
@@ -877,7 +894,9 @@ async function fbRegister() {
             await batch.commit();
 
         } catch (fsErr) {
+            // Firestore write failed — clean up the dangling Auth account
             try { await cred.user.delete(); } catch(e) { /* ignore */ }
+            isRegistering = false;   // clear flag before showing error
             if (fsErr.message === 'USERNAME_TAKEN') {
                 showToast('Username already taken. Please choose another.', 'error', 4000);
             } else {
@@ -886,7 +905,13 @@ async function fbRegister() {
             return;
         }
 
-        // FIX: clear all registration form fields after success
+        // All writes succeeded — lower the flag and sign out cleanly so
+        // the user lands back on the login screen (not auto-logged-in with
+        // a half-initialised session).
+        isRegistering = false;
+        try { await signOut(fbAuth); } catch(e) { /* ignore */ }
+
+        // Clear form fields
         document.getElementById('u-in').value = '';
         document.getElementById('p-in').value = '';
         if (hintEl) hintEl.value = '';
@@ -896,6 +921,7 @@ async function fbRegister() {
         setTimeout(function() { setAuthMode('login'); }, 400);
 
     } catch (err) {
+        isRegistering = false;   // always clear flag
         showToast('Registration failed. Please check your connection and try again.', 'error', 4000);
     }
 }
@@ -1349,11 +1375,27 @@ async function fbLoadChallenges() {
     if (!list || !myName) return;
 
     try {
-        const snap = await getDocs(collection(fbDb, 'challenges'));
+        // FIX: Use targeted where() queries instead of fetching the entire
+        // challenges collection. An unfiltered getDocs(collection(...)) is
+        // blocked by the Firestore rule which needs field-level conditions
+        // (resource.data.from / .to) that cannot be evaluated on a list
+        // query — it only works on a get. Two targeted where queries bypass
+        // this, are faster, and scale with the number of challenges.
+        const [fromSnap, toSnap] = await Promise.all([
+            getDocs(query(collection(fbDb, 'challenges'), where('from', '==', myName))),
+            getDocs(query(collection(fbDb, 'challenges'), where('to',   '==', myName)))
+        ]);
+
+        const seen = new Set();
         const all  = [];
-        snap.forEach(function(d) {
-            const ch = d.data(); ch._id = d.id;
-            if (ch.from === myName || ch.to === myName) all.push(ch);
+        [fromSnap, toSnap].forEach(function(snap) {
+            snap.forEach(function(d) {
+                if (!seen.has(d.id)) {
+                    seen.add(d.id);
+                    const ch = d.data(); ch._id = d.id;
+                    all.push(ch);
+                }
+            });
         });
         all.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
         list.innerHTML = '';
@@ -1373,14 +1415,12 @@ async function fbLoadChallenges() {
             else if (ch.status === 'beaten')  badge = '<span class="ch-badge beaten">🏆 Beaten!</span>';
 
             if (isIncoming) {
-                // FIX: esc() on all Firestore strings
                 card.innerHTML =
                     '<div class="ch-header">' + badge + '<span class="ch-tag incoming-tag">INCOMING</span></div>' +
                     '<b>' + esc(ch.from) + '</b> challenges you on <b>' + esc(ch.topic) + '</b><br>' +
                     '<span style="color:var(--danger);font-weight:800;">Beat their score: ' + Number(ch.score) + '</span>';
 
                 if (ch.status === 'pending') {
-                    // FIX: createElement + dataset instead of onclick string
                     const btn = document.createElement('button');
                     btn.className = 'btn primary sm';
                     btn.style.cssText = 'margin-top:10px;width:100%;';
@@ -1393,18 +1433,14 @@ async function fbLoadChallenges() {
                     btn.dataset.ssc    = ch.ssc  || '';
                     btn.addEventListener('click', function() {
                         acceptChallenge(
-                            this.dataset.chalId,
-                            this.dataset.from,
-                            this.dataset.topic,
-                            this.dataset.cat,
-                            this.dataset.sub,
-                            this.dataset.ssc
+                            this.dataset.chalId, this.dataset.from,
+                            this.dataset.topic,  this.dataset.cat,
+                            this.dataset.sub,    this.dataset.ssc
                         );
                     });
                     card.appendChild(btn);
                 }
             } else {
-                // FIX: esc() on all Firestore strings
                 card.innerHTML =
                     '<div class="ch-header">' + badge + '<span class="ch-tag outgoing-tag">OUTGOING</span></div>' +
                     'You challenged <b>' + esc(ch.to) + '</b> on <b>' + esc(ch.topic) + '</b><br>' +
@@ -1582,23 +1618,20 @@ async function fbCheckChallengeResult(finalScore) {
     window._activeChallengeId = null;
 }
 
-/* ================================================================
-   CHALLENGE BANNER
-   FIX: n.msg previously went into innerHTML directly —
-   a stored notification message containing HTML would execute.
-   Now rendered with textContent, which never parses markup.
-   ================================================================ */
 async function fbLoadChallengeBanner() {
     const myName = window.userDoc ? window.userDoc.username : '';
     const banner = document.getElementById('challenge-banner');
     if (!banner || !myName) return;
     try {
-        const snap    = await getDocs(collection(fbDb, 'challenges'));
+        // FIX: targeted where query instead of full collection scan
+        const pendingSnap = await getDocs(
+            query(collection(fbDb, 'challenges'),
+                where('to',     '==', myName),
+                where('status', '==', 'pending'))
+        );
         const pending = [];
-        snap.forEach(function(d) {
-            const ch = d.data();
-            if (ch.to === myName && ch.status === 'pending') pending.push(ch);
-        });
+        pendingSnap.forEach(function(d) { pending.push(d.data()); });
+
         const notifs = (window.userDoc.notifications || []).filter(function(n) { return !n.seen; });
         if (pending.length === 0 && notifs.length === 0) { banner.classList.add('hidden'); return; }
 
@@ -1608,7 +1641,6 @@ async function fbLoadChallengeBanner() {
         notifs.forEach(function(n) {
             const el = document.createElement('div');
             el.className = 'challenge-notif';
-            // FIX: textContent — never innerHTML for stored notification messages
             el.textContent = '🏆 ' + n.msg;
             banner.appendChild(el);
         });
@@ -1616,7 +1648,6 @@ async function fbLoadChallengeBanner() {
         if (pending.length > 0) {
             const el = document.createElement('div');
             el.className = 'challenge-notif incoming-notif';
-            // This string has no Firestore data in it — just a count (integer) — safe
             el.innerHTML = '⚔️ You have <b>' + pending.length + '</b> pending challenge' +
                            (pending.length > 1 ? 's' : '') +
                            '! <button class="btn primary sm" style="margin-left:8px;" onclick="showShare()">View →</button>';
@@ -1633,6 +1664,12 @@ async function fbLoadChallengeBanner() {
    blank screen with no feedback or on the loading spinner forever.
    ================================================================ */
 onAuthStateChanged(fbAuth, async function(fbUser) {
+    // FIX: If fbRegister() is mid-flight, Firebase Auth has already
+    // auto-signed-in the new user (createUserWithEmailAndPassword does
+    // this automatically) but the Firestore docs haven't been written yet.
+    // We must ignore this auth state change and let fbRegister finish.
+    if (isRegistering) return;
+
     if (!fbUser) return;   // Not signed in — auth screen already showing
     try {
         const data = await loadUserDoc(fbUser.uid);
@@ -1647,9 +1684,6 @@ onAuthStateChanged(fbAuth, async function(fbUser) {
             }
             showLoginLoader(function() { fbShowMain(); });
         } else {
-            // Firestore doc missing — registration may have partially failed.
-            // The Firebase Auth account exists (we're signed in) but the
-            // Firestore user document was never created or was deleted.
             await signOut(fbAuth);
             hideAll();
             document.getElementById('auth-s').classList.remove('hidden');
