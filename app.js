@@ -36,7 +36,7 @@ const fbDb   = getFirestore(fbApp);
    ACTION REQUIRED: Register medlabsolve.com in Firebase Console
    → App Check → Apps to fully enforce domain protection.
    ================================================================ */
-let appCheck = null;
+/*let appCheck = null;
 try {
     appCheck = initializeAppCheck(fbApp, {
         provider: new ReCaptchaV3Provider(
@@ -46,7 +46,7 @@ try {
     });
 } catch (e) {
     // App Check unavailable — Firebase Auth + Firestore still work.
-}
+}*/
 
 /* ================================================================
    CONSTANTS
