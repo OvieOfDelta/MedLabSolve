@@ -494,11 +494,12 @@ function showQ() {
 
     const opts = document.getElementById('opt-container');
     opts.innerHTML = '';
+    opts.dataset.locked = '';   // FIX: unlock options for the new question
     q.o.forEach(function(o) {
         const b = document.createElement('button');
         b.className = 'btn secondary animate-pop';
         b.textContent = o;                      // FIX: textContent not innerText — safe
-        b.onclick   = function() { handleAnswer(o); };
+        b.onclick   = function() { handleAnswer(o, b); };
         opts.appendChild(b);
     });
 
@@ -510,24 +511,61 @@ function showQ() {
         timer = setInterval(function() {
             t--;
             timerEl.innerText = t + 's';
-            if (t <= 0) handleAnswer(null);
+            if (t <= 0) handleAnswer(null, null);
         }, 1000);
     } else {
         timerEl.innerText = '🧘 ∞';
     }
 }
 
-function handleAnswer(o) {
+/* ================================================================
+   ANSWER FEEDBACK
+   FIX: Previously the app scored the answer and silently jumped to
+   the next question with zero visual confirmation of what was
+   marked right or wrong — there was no way to tell, in the moment,
+   whether the option you tapped was actually registered as correct.
+   Now, on answering: all option buttons lock, the option matching
+   q.a is highlighted green, and (if different) the one you picked
+   is highlighted red — so the "correct" answer is always visibly
+   confirmed against the question data before moving on. If you ever
+   see the green highlight land on an option that clearly isn't the
+   right answer, that's a sign the question's data (questions.json)
+   has a typo/mismatch for that item, not a scoring-logic bug.
+   ================================================================ */
+function handleAnswer(o, btnEl) {
     clearInterval(timer);
-    const q     = currentQ[qIdx];
-    const isZen = parseInt(document.getElementById('diff-select').value) === 0;
-    if (o === q.a) {
+
+    const opts = document.getElementById('opt-container');
+    if (opts.dataset.locked === '1') return;   // FIX: ignore double-clicks/late timer fires
+    opts.dataset.locked = '1';
+
+    const q         = currentQ[qIdx];
+    const isZen     = parseInt(document.getElementById('diff-select').value) === 0;
+    const isCorrect = (o === q.a);
+
+    if (isCorrect) {
         if (!isZen) { score++; updateMastery(q); }
     } else {
         mistakes.push({ q: q.q, a: q.a, given: o, ex: q.ex || null });
     }
+
+    Array.from(opts.children).forEach(function(btn) {
+        btn.disabled = true;
+        if (btn.textContent === q.a) {
+            btn.style.background   = 'var(--success, #22c55e)';
+            btn.style.borderColor  = 'var(--success, #22c55e)';
+            btn.style.color        = '#fff';
+        } else if (btn === btnEl) {
+            btn.style.background   = 'var(--danger, #ef4444)';
+            btn.style.borderColor  = 'var(--danger, #ef4444)';
+            btn.style.color        = '#fff';
+        }
+    });
+
     qIdx++;
-    if (qIdx < currentQ.length) { showQ(); } else { endQuiz(); }
+    setTimeout(function() {
+        if (qIdx < currentQ.length) { showQ(); } else { endQuiz(); }
+    }, isCorrect ? 700 : 1400);
 }
 
 function endQuiz() {
@@ -746,7 +784,7 @@ async function saveUserDoc() {
     // Firestore security rules are the server-side enforcement;
     // this is an additional client-side defence-in-depth layer.
     const ALLOWED_KEYS = [
-        'username', 'hint', 'avatar', 'high', 'streak', 'lastLogin',
+        'username', 'hint', 'avatar', 'high', 'totalScore', 'streak', 'lastLogin',
         'mastery', 'badges', 'inviteCode', 'invitedBy', 'inviteCount',
         'notifications'
         // 'role' and 'disabled' are intentionally omitted — admin-only writes
@@ -771,11 +809,12 @@ async function savePublicProfile() {
     const d   = window.userDoc;
     try {
         await setDoc(doc(fbDb, 'leaderboard', uid), {
-            username: d.username || '',
-            avatar:   d.avatar   || '👤',
-            high:     Number(d.high)   || 0,
-            streak:   Number(d.streak) || 0,
-            badges:   d.badges         || []
+            username:   d.username || '',
+            avatar:     d.avatar   || '👤',
+            high:       Number(d.high)       || 0,
+            totalScore: Number(d.totalScore) || 0,
+            streak:     Number(d.streak)     || 0,
+            badges:     d.badges             || []
         });
     } catch (e) { /* silent — leaderboard profile is supplementary */ }
 }
@@ -865,6 +904,7 @@ async function fbRegister() {
                 hint,
                 avatar:        finalAvatar || '👤',
                 high:          0,
+                totalScore:    0,
                 streak:        0,
                 lastLogin:     null,
                 mastery:       {},
@@ -878,10 +918,11 @@ async function fbRegister() {
             });
             batch.set(doc(fbDb, 'leaderboard', uid), {
                 username,
-                avatar: finalAvatar || '👤',
-                high:   0,
-                streak: 0,
-                badges: []
+                avatar:     finalAvatar || '👤',
+                high:       0,
+                totalScore: 0,
+                streak:     0,
+                badges:     []
             });
             await batch.commit();
 
@@ -1102,11 +1143,16 @@ async function fbSaveHighScore(s, totalQuestions) {
     // or the global cap — whichever is smaller.
     const cap = Math.min(totalQuestions || currentQ.length, LIMITS.SCORE_MAX);
     if (typeof s !== 'number' || !Number.isInteger(s) || s < 0 || s > cap) return;
-    if (s > (d.high || 0)) {
-        d.high = s;
-        await saveUserDoc();
-        await savePublicProfile();   // FIX: push new high score to leaderboard profile
-    }
+
+    // FIX: accumulate the lifetime total across every completed (non-Zen)
+    // quiz — this is what the leaderboard now ranks and displays, as
+    // opposed to `high` which stays a single best-quiz record.
+    d.totalScore = (Number(d.totalScore) || 0) + s;
+
+    if (s > (d.high || 0)) d.high = s;
+
+    await saveUserDoc();
+    await savePublicProfile();   // FIX: push updated totals to leaderboard profile
 }
 
 /* ================================================================
@@ -1132,7 +1178,10 @@ async function fbShowLeaderboard() {
             if (typeof data.username !== 'string' || !data.username) return;
             ranked.push({
                 name:   data.username,
-                score:  data.high   || 0,
+                // FIX: leaderboard now ranks/displays the lifetime totalScore
+                // (sum of every completed quiz) rather than a single best
+                // quiz's `high` score.
+                score:  data.totalScore || 0,
                 avatar: data.avatar || '👤'
             });
         });
@@ -1186,11 +1235,15 @@ async function fbShowLeaderboard() {
             left.appendChild(nameSpan);
 
             // Tier badge
+            // FIX: thresholds raised — p.score is now a lifetime cumulative
+            // total rather than one quiz's score, so the old 5/10/20 cutoffs
+            // would put almost everyone in Diamond after a couple of quizzes.
+            // Adjust these numbers to whatever pacing feels right.
             const tier = document.createElement('span');
-            if      (p.score >= 20) { tier.className = 'tier-badge diamond'; tier.textContent = '💎 Diamond'; }
-            else if (p.score >= 10) { tier.className = 'tier-badge gold';    tier.textContent = '🏅 Gold'; }
-            else if (p.score >= 5)  { tier.className = 'tier-badge silver';  tier.textContent = '🔘 Silver'; }
-            else                    { tier.className = 'tier-badge bronze';  tier.textContent = '🎖 Bronze'; }
+            if      (p.score >= 200) { tier.className = 'tier-badge diamond'; tier.textContent = '💎 Diamond'; }
+            else if (p.score >= 100) { tier.className = 'tier-badge gold';    tier.textContent = '🏅 Gold'; }
+            else if (p.score >= 30)  { tier.className = 'tier-badge silver';  tier.textContent = '🔘 Silver'; }
+            else                     { tier.className = 'tier-badge bronze';  tier.textContent = '🎖 Bronze'; }
             left.appendChild(tier);
 
             // Score
@@ -1326,9 +1379,10 @@ async function fbUpdateSettings() {
 
 async function fbResetData() {
     if (!confirm('This will wipe your progress and badges. Continue?')) return;
-    const d   = window.userDoc;
-    d.mastery = {}; d.badges = []; d.high = 0;
+    const d      = window.userDoc;
+    d.mastery    = {}; d.badges = []; d.high = 0; d.totalScore = 0;
     await saveUserDoc();
+    await savePublicProfile();   // FIX: keep leaderboard total in sync with the reset
     showToast('Progress reset.', 'info');
     fbShowMain();
 }
@@ -1968,6 +2022,7 @@ async function adminRepairAccount(uid, username) {
             hint:          '',
             avatar:        '👤',
             high:          0,
+            totalScore:    0,
             streak:        0,
             lastLogin:     null,
             mastery:       {},
@@ -1986,11 +2041,12 @@ async function adminRepairAccount(uid, username) {
         const batch = writeBatch(fbDb);
         batch.set(doc(fbDb, 'users', uid), repaired);
         batch.set(doc(fbDb, 'leaderboard', uid), {
-            username: repaired.username,
-            avatar:   repaired.avatar,
-            high:     Number(repaired.high)   || 0,
-            streak:   Number(repaired.streak) || 0,
-            badges:   repaired.badges         || []
+            username:   repaired.username,
+            avatar:     repaired.avatar,
+            high:       Number(repaired.high)       || 0,
+            totalScore: Number(repaired.totalScore) || 0,
+            streak:     Number(repaired.streak)     || 0,
+            badges:     repaired.badges             || []
         });
 
         // Also ensure the usernames reservation exists
@@ -2065,15 +2121,16 @@ async function adminResetProgress(uid, username) {
         if (!snap.exists()) return;
         const data = snap.data();
         await setDoc(doc(fbDb, 'users', uid), Object.assign({}, data, {
-            high: 0, streak: 0, mastery: {}, badges: [], notifications: []
+            high: 0, totalScore: 0, streak: 0, mastery: {}, badges: [], notifications: []
         }));
         // FIX: also reset the leaderboard doc so the reset is reflected immediately
         await setDoc(doc(fbDb, 'leaderboard', uid), {
-            username: data.username || '',
-            avatar:   data.avatar   || '👤',
-            high:     0,
-            streak:   0,
-            badges:   []
+            username:   data.username || '',
+            avatar:     data.avatar   || '👤',
+            high:       0,
+            totalScore: 0,
+            streak:     0,
+            badges:     []
         });
         showToast(username + "'s progress has been reset.", 'info', 3000);
         adminLoadPlayers();
