@@ -182,6 +182,9 @@ let currentCat = '';
 let currentSub = '';
 let currentSsc = '';
 let toastTimer = null;
+// FIX: guards against a registration/observer race — see fbRegister and
+// onAuthStateChanged for the full explanation.
+let skipAuthObserver = false;
 
 /* ================================================================
    INIT — load questions, restore theme
@@ -865,6 +868,18 @@ async function fbRegister() {
     const usernameLower = username.toLowerCase();
     const fakeEmail     = usernameLower + '@medlabquiz.local';
 
+    // FIX: createUserWithEmailAndPassword signs the new user in immediately,
+    // which fires the onAuthStateChanged observer further down this file.
+    // That observer expects a fully-written users/{uid} Firestore doc, but
+    // at this point we haven't written it yet — it's written a few lines
+    // below, after a transaction + batch commit. Depending on network
+    // timing, the observer could see "no doc yet" first, sign the account
+    // back out, and show "Account data not found" *while this function was
+    // still mid-write* — a race that made registration succeed or fail
+    // unpredictably (this is why it sometimes took a few tries). Setting
+    // this flag tells the observer to stand down until we're fully done.
+    skipAuthObserver = true;
+
     try {
         showToast('Creating account…', 'info', 5000);
 
@@ -936,6 +951,13 @@ async function fbRegister() {
             return;
         }
 
+        // FIX: explicitly sign the brand-new account back out. Previously
+        // it stayed signed in (createUserWithEmailAndPassword's default
+        // behavior) even though the toast below tells the user to log in
+        // manually — now that's actually true, and it removes any chance
+        // of the auth observer acting on this session at all.
+        try { await signOut(fbAuth); } catch (e) { /* ignore */ }
+
         // FIX: clear all registration form fields after success
         document.getElementById('u-in').value = '';
         document.getElementById('p-in').value = '';
@@ -947,6 +969,8 @@ async function fbRegister() {
 
     } catch (err) {
         showToast('Registration failed. Please check your connection and try again.', 'error', 4000);
+    } finally {
+        skipAuthObserver = false;   // FIX: always release the guard, success or failure
     }
 }
 
@@ -1380,7 +1404,11 @@ async function fbUpdateSettings() {
 async function fbResetData() {
     if (!confirm('This will wipe your progress and badges. Continue?')) return;
     const d      = window.userDoc;
-    d.mastery    = {}; d.badges = []; d.high = 0; d.totalScore = 0;
+    // FIX: streak was never reset here even though it's part of visible
+    // "progress" (shown right on the main screen, and reset by the admin's
+    // equivalent adminResetProgress action) — leaving it made the reset
+    // look partial/incomplete.
+    d.mastery    = {}; d.badges = []; d.high = 0; d.totalScore = 0; d.streak = 0;
     await saveUserDoc();
     await savePublicProfile();   // FIX: keep leaderboard total in sync with the reset
     showToast('Progress reset.', 'info');
@@ -1688,6 +1716,7 @@ async function fbLoadChallengeBanner() {
    blank screen with no feedback or on the loading spinner forever.
    ================================================================ */
 onAuthStateChanged(fbAuth, async function(fbUser) {
+    if (skipAuthObserver) return;   // FIX: don't race an in-progress registration (see fbRegister)
     if (!fbUser) return;   // Not signed in — auth screen already showing
     try {
         const data = await loadUserDoc(fbUser.uid);
