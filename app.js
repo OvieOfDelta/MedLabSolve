@@ -1124,12 +1124,11 @@ function renderCoverageProgress() {
             masteredCount += (Array.isArray(d.mastery[k]) ? d.mastery[k].length : 0);
         });
     }
-    const total     = quizData.length;
-    const pct       = Math.min(100, Math.round((masteredCount / total) * 100));
-    const remaining = Math.max(0, total - masteredCount);
+    const total = quizData.length;
+    const pct   = Math.min(100, Math.round((masteredCount / total) * 100));
 
     fill.style.width  = pct + '%';
-    label.textContent = masteredCount + ' / ' + total + ' (' + pct + '%) · ' + remaining + ' left';
+    label.textContent = pct + '%';
 }
 
 async function fbShowMain() {
