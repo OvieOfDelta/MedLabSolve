@@ -185,6 +185,9 @@ let toastTimer = null;
 // FIX: guards against a registration/observer race — see fbRegister and
 // onAuthStateChanged for the full explanation.
 let skipAuthObserver = false;
+// FIX: guards against concurrent fbRegister() calls — see fbRegister for
+// the full explanation of why double-submits were breaking registration.
+let registering = false;
 
 /* ================================================================
    INIT — load questions, restore theme
@@ -836,6 +839,24 @@ async function savePublicProfile() {
    FIX 7: Network / App Check errors surfaced with specific messages.
    ================================================================ */
 async function fbRegister() {
+    // FIX: the button wasn't disabled and there was no in-flight guard, so
+    // an impatient extra click (or two) while the first request was still
+    // awaiting createUserWithEmailAndPassword/Firestore fired a *second*
+    // concurrent fbRegister() call. Both calls share the same module-level
+    // skipAuthObserver flag, so whichever call finished first reset it to
+    // false in its `finally` block WHILE THE OTHER CALL WAS STILL MID-WRITE
+    // — unblocking the onAuthStateChanged observer too early, which then
+    // raced the still-in-flight write, saw an incomplete doc, and signed
+    // the new account back out. That's what made it look like it "wasn't
+    // registering" until a few retries happened to land without overlap.
+    if (registering) {
+        showToast('Already creating your account — one moment…', 'info', 2000);
+        return;
+    }
+    registering = true;
+    const submitBtn = document.getElementById('auth-main-btn');
+    if (submitBtn) submitBtn.disabled = true;
+
     const username  = document.getElementById('u-in').value.trim();
     const password  = document.getElementById('p-in').value.trim();
     const hintEl    = document.getElementById('hint-in');
@@ -845,23 +866,32 @@ async function fbRegister() {
     const codeEl    = document.getElementById('invite-code-in');
     const invitedBy = codeEl ? codeEl.value.trim().toUpperCase() : null;
 
+    // FIX: every early `return` below used to skip re-enabling the button
+    // and clearing the in-flight flag. Route them all through this helper
+    // instead so the guard can never get stuck "on".
+    function bail(msg) {
+        showToast(msg, 'error', msg.length > 60 ? 4000 : 3000);
+        registering = false;
+        if (submitBtn) submitBtn.disabled = false;
+    }
+
     if (!USERNAME_RE.test(username)) {
-        showToast('Username must be 3–20 characters: letters, numbers, underscore only.', 'error', 4000);
+        bail('Username must be 3–20 characters: letters, numbers, underscore only.');
         return;
     }
-    if (!password) { showToast('Please enter a password.', 'error'); return; }
+    if (!password) { bail('Please enter a password.'); return; }
     if (password.length < LIMITS.PASSWORD_MIN) {
-        showToast('Password must be at least ' + LIMITS.PASSWORD_MIN + ' characters.', 'error');
+        bail('Password must be at least ' + LIMITS.PASSWORD_MIN + ' characters.');
         return;
     }
     if (hint.length > LIMITS.HINT_MAX) {
-        showToast('Security hint must be under ' + LIMITS.HINT_MAX + ' characters.', 'error');
+        bail('Security hint must be under ' + LIMITS.HINT_MAX + ' characters.');
         return;
     }
 
     const finalAvatar = (av === 'custom' && customImg) ? customImg : av;
     if (finalAvatar && finalAvatar.length > LIMITS.AVATAR_MAX) {
-        showToast('Avatar image is too large. Please use a smaller photo.', 'error');
+        bail('Avatar image is too large. Please use a smaller photo.');
         return;
     }
 
@@ -971,6 +1001,8 @@ async function fbRegister() {
         showToast('Registration failed. Please check your connection and try again.', 'error', 4000);
     } finally {
         skipAuthObserver = false;   // FIX: always release the guard, success or failure
+        registering       = false;   // FIX: always release the double-submit guard too
+        if (submitBtn) submitBtn.disabled = false;
     }
 }
 
@@ -1071,6 +1103,35 @@ async function fbForgot() {
    malicious avatar value is stored in Firestore.
    FIX: highEl uses esc() and only numeric d.high is interpolated.
    ================================================================ */
+/* ================================================================
+   QUESTION COVERAGE PROGRESS
+   Shows what % of the entire question bank the player has gotten
+   correct at least once (reusing the same d.mastery data already
+   tracked for badges), plus how many questions are left. Uses the
+   native #coverage-progress / #coverage-label markup in index.html,
+   which mirrors the existing rank-progress bar's progress-container
+   / progress-fill pattern.
+   ================================================================ */
+function renderCoverageProgress() {
+    const d     = window.userDoc;
+    const fill  = document.getElementById('coverage-progress');
+    const label = document.getElementById('coverage-label');
+    if (!d || !fill || !label || !Array.isArray(quizData) || quizData.length === 0) return;
+
+    let masteredCount = 0;
+    if (d.mastery) {
+        Object.keys(d.mastery).forEach(function(k) {
+            masteredCount += (Array.isArray(d.mastery[k]) ? d.mastery[k].length : 0);
+        });
+    }
+    const total     = quizData.length;
+    const pct       = Math.min(100, Math.round((masteredCount / total) * 100));
+    const remaining = Math.max(0, total - masteredCount);
+
+    fill.style.width  = pct + '%';
+    label.textContent = masteredCount + ' / ' + total + ' (' + pct + '%) · ' + remaining + ' left';
+}
+
 async function fbShowMain() {
     hideAll();
     document.getElementById('main-s').classList.remove('hidden');
@@ -1122,6 +1183,8 @@ async function fbShowMain() {
     document.getElementById('rank-progress').style.width = rp + '%';
     document.getElementById('display-streak').innerText  = d.streak || 0;
     document.getElementById('display-streak').classList.toggle('streak-flame', streakIncreased);
+
+    renderCoverageProgress();   // FIX: new — % of the total question bank covered so far
 
     fbLoadChallengeBanner();
 
@@ -1408,10 +1471,27 @@ async function fbResetData() {
     // "progress" (shown right on the main screen, and reset by the admin's
     // equivalent adminResetProgress action) — leaving it made the reset
     // look partial/incomplete.
+    const prevHigh = d.high; const prevTotal = d.totalScore; const prevStreak = d.streak;
+    const prevMastery = d.mastery; const prevBadges = d.badges;
     d.mastery    = {}; d.badges = []; d.high = 0; d.totalScore = 0; d.streak = 0;
-    await saveUserDoc();
-    await savePublicProfile();   // FIX: keep leaderboard total in sync with the reset
-    showToast('Progress reset.', 'info');
+    try {
+        // FIX: previously any failure here (e.g. rejected by Firestore
+        // security rules) was never caught — saveUserDoc()'s promise
+        // rejected silently, window.userDoc had already been mutated
+        // locally, and the UI showed "Progress reset." even though
+        // nothing was actually written. Wrap in try/catch, and roll the
+        // local copy back if the server write didn't go through — the
+        // write is a single atomic setDoc, so either everything applied
+        // or nothing did — so the UI never lies about what's saved.
+        await saveUserDoc();
+        await savePublicProfile();   // FIX: keep leaderboard total in sync with the reset
+        showToast('Progress reset.', 'info');
+    } catch (e) {
+        d.high = prevHigh; d.totalScore = prevTotal; d.streak = prevStreak;
+        d.mastery = prevMastery; d.badges = prevBadges;
+        showToast('Could not reset progress — please try again.', 'error', 4000);
+        return;
+    }
     fbShowMain();
 }
 
