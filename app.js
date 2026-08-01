@@ -619,11 +619,7 @@ function endQuiz() {
             div.className = 'mistake-item';
             // FIX: m.q and m.a come from local questions.json — still esc() for
             // defence-in-depth in case the JSON file is ever tampered with.
-            const givenLabel = (m.given == null)
-                ? '<b style="color:var(--danger,#ef4444);">⏱️ No answer (time ran out)</b>'
-                : '<b style="color:var(--danger,#ef4444);">❌ ' + esc(m.given) + '</b>';
-            div.innerHTML = '<span>' + esc(m.q) + '</span><br>' + givenLabel +
-                            '<br><b>✅ ' + esc(m.a) + '</b>' +
+            div.innerHTML = '<span>' + esc(m.q) + '</span><br><b>✅ ' + esc(m.a) + '</b>' +
                             (m.ex ? '<div class="explanation">' + esc(m.ex) + '</div>' : '');
             list.appendChild(div);
         });
