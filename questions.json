@@ -257,12 +257,12 @@
     "ssc": "Metabolic Panels",
     "q": "Hypoglycemia is generally defined as a blood glucose level below:",
     "o": [
-      "100 mg/dL",
-      "126 mg/dL",
-      "70 mg/dL",
-      "200 mg/dL"
+      "100 mg/dL (5.56 mmol/L)",
+      "126 mg/dL (7 mmol/L)",
+      "70 mg/dL (3.89 mmol/L)",
+      "200 mg/dL (11.11 mmol/L)"
     ],
-    "a": "70 mg/dL",
+    "a": "70 mg/dL (3.89 mmol/L)",
     "pts": 1
   },
   {
@@ -341,10 +341,10 @@
     "ssc": "Metabolic Panels",
     "q": "Jaundice becomes clinically visible when total bilirubin exceeds:",
     "o": [
-      "0.5 mg/dL",
-      "1.2 mg/dL",
-      "2.5 mg/dL",
-      "10.0 mg/dL"
+      "0.5 mg/dL (8.55 µmol)",
+      "1.2 mg/dL (20.52 µmol)",
+      "2.5 mg/dL (42.75 µmol)",
+      "10.0 mg/dL (17.1 µmol)"
     ],
     "a": "2.5 mg/dL (42.75 µmol/L)",
     "pts": 1
@@ -1419,12 +1419,12 @@
     "ssc": "Lipid Profile",
     "q": "The Friedewald equation for calculating LDL cholesterol is invalid if Triglyceride levels exceed:",
     "o": [
-      "200 mg/dL",
-      "300 mg/dL",
-      "400 mg/dL",
-      "500 mg/dL"
+      "200 mg/dL (2.26 mmol/L)",
+      "300 mg/dL (3.38 mmol/L)",
+      "400 mg/dL (4.52 mmol/L)",
+      "500 mg/dL (5.65 mmol/L)"
     ],
-    "a": "400 mg/dL",
+    "a": "400 mg/dL (4.52 mmol/L)",
     "pts": 1
   },
   {
@@ -1559,12 +1559,12 @@
     "ssc": "Lipid Profile",
     "q": "Which of the following is a 'negative' risk factor for Coronary Heart Disease (meaning it reduces risk)?",
     "o": [
-      "LDL > 160 mg/dL",
-      "HDL > 60 mg/dL",
+      "LDL > 160 mg/dL (4.14 mmol/L)",
+      "HDL > 60 mg/dL (2.09 mmol/L)",
       "Smoking",
       "Diabetes"
     ],
-    "a": "HDL > 60 mg/dL",
+    "a": "HDL > 60 mg/dL (2.09 mmol/L)",
     "pts": 1
   },
   {
@@ -4331,12 +4331,12 @@
     "ssc": "Glucose and Metabolic Regulation",
     "q": "According to ADA criteria, a fasting plasma glucose (FPG) diagnostic for diabetes is:",
     "o": [
-      "100 mg/dL",
-      "110 mg/dL",
-      "126 mg/dL",
-      "140 mg/dL"
+      "100 mg/dL (5.56 mmol/L)",
+      "110 mg/dL (6.11 mmol/L)",
+      "126 mg/dL (7 mmol/L)",
+      "140 mg/dL (7.78 mmol/L)"
     ],
-    "a": "126 mg/dL",
+    "a": "126 mg/dL (7 mmol/L)",
     "pts": 1
   },
   {
@@ -4527,12 +4527,12 @@
     "ssc": "Glucose and Metabolic Regulation",
     "q": "In a standard 75g Oral Glucose Tolerance Test (OGTT), the diagnostic 2-hour value for diabetes is:",
     "o": [
-      "140 mg/dL",
-      "160 mg/dL",
-      "200 mg/dL",
-      "250 mg/dL"
+      "140 mg/dL (7.78 mmol/L)",
+      "160 mg/dL (8.89 mmol/L)",
+      "200 mg/dL (11.11 mmol/L)",
+      "250 mg/dL (13.89 mmol/L)"
     ],
-    "a": "200 mg/dL",
+    "a": "200 mg/dL (11.11 mmol/L)",
     "pts": 1
   },
   {
@@ -23294,9 +23294,9 @@
     "q": "'Metabolic Syndrome' includes high triglycerides and low HDL as part of its diagnostic criteria. The HDL cutoff for men is usually:",
     "o": [
       "< 40 mg/dL (1.0 mmol/L)",
-      "< 60 mg/dL",
-      "> 100 mg/dL",
-      "50 mg/dL"
+      "< 60 mg/dL (1.55 mmol/L)",
+      "> 100 mg/dL (2.59 mmol/L)",
+      "50 mg/dL (1.29 mmol/L)"
     ],
     "a": "< 40 mg/dL (1.0 mmol/L)"
   },
