@@ -341,10 +341,10 @@
     "ssc": "Metabolic Panels",
     "q": "Jaundice becomes clinically visible when total bilirubin exceeds:",
     "o": [
-      "0.5 mg/dL (8.55 µmol)",
-      "1.2 mg/dL (20.52 µmol)",
-      "2.5 mg/dL (42.75 µmol)",
-      "10.0 mg/dL (17.1 µmol)"
+      "0.5 mg/dL (8.55 µmol/L)",
+      "1.2 mg/dL (20.52 µmol/L)",
+      "2.5 mg/dL (42.75 µmol/L)",
+      "10.0 mg/dL (17.1 µmol/L)"
     ],
     "a": "2.5 mg/dL (42.75 µmol/L)",
     "pts": 1
